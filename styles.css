@@ -48,7 +48,8 @@ header h1 {
 
 .subtitle {
     font-size: 1.1rem;
-    opacity: 0.95;
+    opacity: 0.85;
+    color: rgba(255, 255, 255, 0.85);
     font-style: italic;
     margin-bottom: 1.5rem;
 }

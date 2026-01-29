@@ -8,35 +8,35 @@ const machineConfigs = {
     'formlabs-fuse1-30w': {
         name: 'Formlabs Fuse 1+ 30W',
         chamberVolume: 8.17,
-        packingDensity: 0.29,
+        packingDensity: 29,  // Percentage value
         buildVolume: '165 × 165 × 300 mm',
         type: 'Desktop'
     },
     'eos-p770': {
         name: 'EOS P770',
         chamberVolume: 154,
-        packingDensity: 0.10,
+        packingDensity: 10,  // Percentage value
         buildVolume: '700 × 380 × 580 mm',
         type: 'Industrial'
     },
     'eos-p396': {
         name: 'EOS P396',
         chamberVolume: 89,
-        packingDensity: 0.11,
+        packingDensity: 11,  // Percentage value
         buildVolume: '340 × 340 × 600 mm',
         type: 'Industrial'
     },
     '3dsystems-spro60': {
         name: '3D Systems sPro 60',
         chamberVolume: 68,
-        packingDensity: 0.12,
+        packingDensity: 12,  // Percentage value
         buildVolume: '381 × 330 × 457 mm',
         type: 'Industrial'
     },
     'hp-mjf5200': {
         name: 'HP Multi Jet Fusion 5200',
         chamberVolume: 116,
-        packingDensity: 0.13,
+        packingDensity: 13,  // Percentage value
         buildVolume: '380 × 284 × 380 mm',
         type: 'Industrial'
     }
@@ -77,11 +77,11 @@ function handleMachineSelection() {
  * Run optimization and display results
  */
 function runOptimization() {
-    // Get input values
-    const packingDensity = parseFloat(packingDensityInput.value);
+    // Get input values and convert percentages to decimals
+    const packingDensity = parseFloat(packingDensityInput.value) / 100;  // Convert % to decimal
     const chamberVolume = parseFloat(chamberVolumeInput.value);
-    const qualityThreshold = parseFloat(qualityThresholdInput.value);
-    const degradedLimit = parseFloat(degradedLimitInput.value);
+    const qualityThreshold = parseFloat(qualityThresholdInput.value) / 100;  // Convert to decimal
+    const degradedLimit = parseFloat(degradedLimitInput.value) / 100;  // Convert % to decimal
     const powderCost = parseFloat(powderCostInput.value);
     const buildsPerYear = parseInt(buildsPerYearInput.value);
     

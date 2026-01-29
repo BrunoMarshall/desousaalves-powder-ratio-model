@@ -70,7 +70,7 @@
 
                     <div class="form-group">
                         <label for="packing-density">Packing Density (ρ_pack):</label>
-                        <input type="number" id="packing-density" min="0.05" max="0.40" step="0.01" value="0.29">
+                        <input type="number" id="packing-density" min="5" max="40" step="1" value="29">
                         <span class="unit">%</span>
                         <small>Typical range: 8-12% (industrial), 25-35% (desktop)</small>
                     </div>
@@ -83,13 +83,14 @@
 
                     <div class="form-group">
                         <label for="quality-threshold">Quality Threshold (Q_min):</label>
-                        <input type="number" id="quality-threshold" min="0.50" max="0.85" step="0.05" value="0.60">
-                        <small>Recommended: 0.55-0.65 (standard), 0.65-0.70 (critical parts)</small>
+                        <input type="number" id="quality-threshold" min="50" max="85" step="5" value="60">
+                        <span class="unit">/ 100</span>
+                        <small>Recommended: 55-65 (standard), 65-70 (critical parts)</small>
                     </div>
 
                     <div class="form-group">
                         <label for="degraded-limit">Degraded Powder Limit (ε):</label>
-                        <input type="number" id="degraded-limit" min="0.05" max="0.20" step="0.01" value="0.12">
+                        <input type="number" id="degraded-limit" min="5" max="20" step="1" value="12">
                         <span class="unit">%</span>
                         <small>Maximum fraction of degraded powder (S₄ state)</small>
                     </div>

@@ -1,0 +1,85 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Powder Refresh Ratio Optimization Model: A Markov Chain-Based Framework for SLS Powder Management"
+version: 1.0.0
+date-released: 2025-01-29
+url: "https://github.com/BrunoMarshall/desousaalves-powder-ratio-model"
+repository-code: "https://github.com/BrunoMarshall/desousaalves-powder-ratio-model"
+license: MIT
+keywords:
+  - Selective Laser Sintering
+  - SLS
+  - PA12 powder
+  - powder aging
+  - Markov chains
+  - stochastic optimization
+  - additive manufacturing
+  - powder bed fusion
+  - material sustainability
+  - powder refresh ratio
+
+authors:
+  - family-names: "de Sousa Alves"
+    given-names: "Bruno Alexandre"
+    orcid: "https://orcid.org/0000-0002-2716-5329"
+    affiliation: "Staffordshire University, UK; Ford-Werke GmbH, Germany"
+    
+  - family-names: "Soliman"
+    given-names: "Abdel-Hamid"
+    orcid: "https://orcid.org/0000-0001-7382-1107"
+    email: "a.soliman@staffs.ac.uk"
+    affiliation: "Staffordshire University, UK"
+    
+  - family-names: "Kontziampasis"
+    given-names: "Dimitrios"
+    orcid: "https://orcid.org/0000-0002-6787-8892"
+    email: "D.Kontziampasis@leeds.ac.uk"
+    affiliation: "University of Leeds, UK; University of Dundee, UK"
+
+abstract: >
+  This software implements a novel probabilistic framework based on Markov chain theory
+  to optimize virgin powder refresh ratios in Selective Laser Sintering (SLS) without
+  requiring particle-level tracking. By modeling PA12 particles as existing in discrete
+  aging states with probabilistic transitions governed by thermal exposure, we derive
+  the steady-state distribution of aging conditions within the recycled powder stock.
+  
+  The model reveals that the optimal virgin ratio equals the minimum sustainable threshold
+  (equal to packing density) plus a quality margin dependent on material degradation kinetics.
+  Validation using a Formlabs Fuse 1+ 30W system demonstrates that the optimal virgin ratio
+  (29%) closely matches Formlabs' empirically-derived recommendation (30%). For operations
+  using conservative 50:50 strategies inherited from industrial practice, the model
+  demonstrates potential cost savings of 42% while maintaining specified quality thresholds.
+
+references:
+  - type: article
+    title: "A Novel Stochastic Model for Optimizing PA12 Powder Refresh Ratios in Selective Laser Sintering"
+    authors:
+      - family-names: "de Sousa Alves"
+        given-names: "Bruno Alexandre"
+      - family-names: "Soliman"
+        given-names: "Abdel-Hamid"
+      - family-names: "Kontziampasis"
+        given-names: "Dimitrios"
+    year: 2025
+    status: "in review"
+    abstract: >
+      The optimization of polyamide 12 (PA12) powder refresh strategies in Selective
+      Laser Sintering (SLS) represents a critical challenge with profound implications
+      for material economics, sustainability, and part quality. This paper presents a
+      novel probabilistic framework based on Markov chain theory to optimize virgin
+      powder refresh ratios without requiring particle-level tracking.
+
+preferred-citation:
+  type: software
+  title: "Powder Refresh Ratio Optimization Model"
+  authors:
+    - family-names: "de Sousa Alves"
+      given-names: "Bruno Alexandre"
+    - family-names: "Soliman"
+      given-names: "Abdel-Hamid"
+    - family-names: "Kontziampasis"
+      given-names: "Dimitrios"
+  year: 2025
+  url: "https://desousaalves-powder-ratio-model.com"
+  repository-code: "https://github.com/BrunoMarshall/desousaalves-powder-ratio-model"

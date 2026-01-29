@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>De Sousa Alves et al. Powder Refresh Ratio Model | SLS Optimization</title>
+    <meta name="description" content="Markov chain-based optimization framework for PA12 powder refresh ratios in Selective Laser Sintering">
+    <meta name="keywords" content="SLS, powder management, PA12, additive manufacturing, Markov chain">
+    <meta name="author" content="Bruno Alexandre de Sousa Alves, Abdel-Hamid Soliman, Dimitrios Kontziampasis">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>De Sousa Alves et al. Powder Refresh Ratio Model</h1>
+            <p class="subtitle">A Novel Stochastic Model for Optimizing PA12 Powder Refresh Ratios in Selective Laser Sintering</p>
+            <nav>
+                <a href="#calculator">Calculator</a>
+                <a href="#about">About</a>
+                <a href="#methodology">Methodology</a>
+                <a href="#citation">Citation</a>
+                <a href="https://github.com/BrunoMarshall/desousaalves-powder-ratio-model" target="_blank">GitHub</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="hero-content">
+                <h2>Optimize Your SLS Powder Management</h2>
+                <p>This tool implements the Markov chain-based optimization framework published in our research paper. Calculate optimal virgin-to-aged powder ratios for your specific SLS system to minimize material costs while maintaining quality.</p>
+                <div class="key-findings">
+                    <div class="finding">
+                        <span class="number">42%</span>
+                        <span class="label">Cost Reduction Potential</span>
+                    </div>
+                    <div class="finding">
+                        <span class="number">α = ρ</span>
+                        <span class="label">Minimum Sustainable Ratio</span>
+                    </div>
+                    <div class="finding">
+                        <span class="number">5 States</span>
+                        <span class="label">Aging Classification</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Calculator Section -->
+        <section id="calculator" class="calculator-section">
+            <h2>Interactive Calculator</h2>
+            
+            <div class="calculator-container">
+                <div class="input-panel">
+                    <h3>System Configuration</h3>
+                    
+                    <div class="form-group">
+                        <label for="machine-select">Select SLS Machine:</label>
+                        <select id="machine-select">
+                            <option value="custom">Custom Configuration</option>
+                            <option value="formlabs-fuse1-30w">Formlabs Fuse 1+ 30W</option>
+                            <option value="eos-p770">EOS P770</option>
+                            <option value="eos-p396">EOS P396</option>
+                            <option value="3dsystems-spro60">3D Systems sPro 60</option>
+                            <option value="hp-mjf5200">HP Multi Jet Fusion 5200</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="packing-density">Packing Density (ρ_pack):</label>
+                        <input type="number" id="packing-density" min="0.05" max="0.40" step="0.01" value="0.29">
+                        <span class="unit">%</span>
+                        <small>Typical range: 8-12% (industrial), 25-35% (desktop)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="chamber-volume">Chamber Volume (V_chamber):</label>
+                        <input type="number" id="chamber-volume" min="1" max="500" step="0.1" value="8.17">
+                        <span class="unit">Liters</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="quality-threshold">Quality Threshold (Q_min):</label>
+                        <input type="number" id="quality-threshold" min="0.50" max="0.85" step="0.05" value="0.60">
+                        <small>Recommended: 0.55-0.65 (standard), 0.65-0.70 (critical parts)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="degraded-limit">Degraded Powder Limit (ε):</label>
+                        <input type="number" id="degraded-limit" min="0.05" max="0.20" step="0.01" value="0.12">
+                        <span class="unit">%</span>
+                        <small>Maximum fraction of degraded powder (S₄ state)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="powder-cost">Powder Cost (per kg):</label>
+                        <input type="number" id="powder-cost" min="10" max="500" step="5" value="119">
+                        <span class="unit">€</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="builds-per-year">Builds per Year:</label>
+                        <input type="number" id="builds-per-year" min="10" max="1000" step="10" value="200">
+                    </div>
+
+                    <button id="calculate-btn" class="btn-primary">Calculate Optimal Ratio</button>
+                </div>
+
+                <div class="results-panel">
+                    <h3>Optimization Results</h3>
+                    <div id="results-content">
+                        <p class="placeholder">Enter your system parameters and click "Calculate Optimal Ratio" to see results.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about" class="about-section">
+            <h2>About This Model</h2>
+            <div class="about-content">
+                <p>The optimization framework presented here is based on Markov chain theory, applying mathematical principles developed by Andrey Markov (1906) and Andrey Kolmogorov (1930s) to modern additive manufacturing challenges.</p>
+                
+                <div class="theorem-box">
+                    <h4>Theorem 1: Minimum Sustainable Virgin Ratio</h4>
+                    <p>For continuous SLS operation without stock depletion, the virgin ratio must satisfy:</p>
+                    <p class="equation">α ≥ ρ<sub>pack</sub></p>
+                    <p>The minimum sustainable virgin ratio equals the packing density: <strong>α<sub>min</sub> = ρ<sub>pack</sub></strong></p>
+                </div>
+
+                <h3>Key Features</h3>
+                <ul>
+                    <li><strong>First-principles mathematical foundation</strong> - Not empirical curve fitting</li>
+                    <li><strong>Material conservation guarantee</strong> - Ensures sustainable operation</li>
+                    <li><strong>Quality-constrained optimization</strong> - Balances cost and part quality</li>
+                    <li><strong>Validated against industrial practice</strong> - Model optimum (29%) matches Formlabs guideline (30%)</li>
+                    <li><strong>Applicable across platforms</strong> - Desktop to industrial SLS systems</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Methodology Section -->
+        <section id="methodology" class="methodology-section">
+            <h2>Methodology</h2>
+            
+            <div class="method-grid">
+                <div class="method-card">
+                    <h3>1. State Space Definition</h3>
+                    <p>PA12 particles are classified into five discrete aging states based on crystallinity and thermal exposure:</p>
+                    <ul>
+                        <li><strong>S₀ (Virgin):</strong> 0 cycles, &lt;43% crystallinity</li>
+                        <li><strong>S₁ (Lightly Aged):</strong> 1-2 cycles, 43-44%</li>
+                        <li><strong>S₂ (Moderately Aged):</strong> 3-5 cycles, 44-45%</li>
+                        <li><strong>S₃ (Heavily Aged):</strong> 6-10 cycles, 45-46%</li>
+                        <li><strong>S₄ (Degraded):</strong> &gt;10 cycles, &gt;46%</li>
+                    </ul>
+                </div>
+
+                <div class="method-card">
+                    <h3>2. Markov Chain Formulation</h3>
+                    <p>Powder aging follows a stochastic process with transition probabilities calibrated from 7-cycle DSC studies:</p>
+                    <p class="equation">P(S<sub>k+1</sub> = j | S<sub>k</sub> = i) = p<sub>ij</sub></p>
+                    <p>The transition matrix P is upper triangular (irreversible aging) with S₄ as an absorbing state.</p>
+                </div>
+
+                <div class="method-card">
+                    <h3>3. Steady-State Analysis</h3>
+                    <p>The equilibrium distribution of powder states is derived analytically:</p>
+                    <p class="equation">π<sub>stock</sub>* = α·δ₀·P·[I - (1-α)·P]<sup>-1</sup></p>
+                    <p>This closed-form solution enables rapid optimization without iterative simulation.</p>
+                </div>
+
+                <div class="method-card">
+                    <h3>4. Quality Metric</h3>
+                    <p>Composite quality index based on state distribution:</p>
+                    <p class="equation">Q(π) = w·π<sup>T</sup></p>
+                    <p>Weight vector: w = [1.0, 0.9, 0.7, 0.4, 0.0]</p>
+                    <p>Calibrated to mechanical property degradation.</p>
+                </div>
+            </div>
+
+            <div class="validation-box">
+                <h3>Experimental Validation</h3>
+                <p><strong>System:</strong> Formlabs Fuse 1+ 30W (ρ<sub>pack</sub> = 29%)</p>
+                <p><strong>Theoretical Optimum:</strong> α<sub>opt</sub> = 29%</p>
+                <p><strong>Formlabs Guideline:</strong> α = 30%</p>
+                <p><strong>Difference:</strong> 1.0% (excellent agreement)</p>
+                <p>DSC measurements: 42.33% → 45.30% crystallinity over 7 cycles</p>
+            </div>
+        </section>
+
+        <!-- Citation Section -->
+        <section id="citation" class="citation-section">
+            <h2>Citation</h2>
+            <div class="citation-box">
+                <h3>Paper (In Review)</h3>
+                <pre>
+Bruno Alexandre de Sousa Alves, Abdel-Hamid Soliman, Dimitrios Kontziampasis
+"A Novel Stochastic Model for Optimizing PA12 Powder Refresh Ratios in 
+Selective Laser Sintering: Application of Markov Chain Theory to Minimize 
+Material Waste in Additive Manufacturing"
+[Journal Name], 2025 (In Review)
+                </pre>
+
+                <h3>Software</h3>
+                <pre>
+De Sousa Alves, B. A., Soliman, A. H., & Kontziampasis, D. (2025). 
+Powder Refresh Ratio Optimization Model (Version 1.0) [Computer software]. 
+https://github.com/BrunoMarshall/desousaalves-powder-ratio-model
+                </pre>
+
+                <h3>BibTeX</h3>
+                <pre>
+@software{desousaalves2025powder,
+  author = {de Sousa Alves, Bruno Alexandre and Soliman, Abdel-Hamid and Kontziampasis, Dimitrios},
+  title = {Powder Refresh Ratio Optimization Model},
+  year = {2025},
+  url = {https://github.com/BrunoMarshall/desousaalves-powder-ratio-model},
+  version = {1.0}
+}
+                </pre>
+            </div>
+        </section>
+
+        <!-- Authors Section -->
+        <section class="authors-section">
+            <h2>Authors</h2>
+            <div class="authors-grid">
+                <div class="author-card">
+                    <h3>Bruno Alexandre de Sousa Alves</h3>
+                    <p>Staffordshire University, UK</p>
+                    <p>Ford-Werke GmbH, Germany</p>
+                    <p>ORCID: 0000-0002-2716-5329</p>
+                </div>
+                <div class="author-card">
+                    <h3>Abdel-Hamid Soliman</h3>
+                    <p>Staffordshire University, UK</p>
+                    <p>ORCID: 0000-0001-7382-1107</p>
+                    <p>✉️ a.soliman@staffs.ac.uk</p>
+                </div>
+                <div class="author-card">
+                    <h3>Dimitrios Kontziampasis</h3>
+                    <p>University of Leeds, UK</p>
+                    <p>University of Dundee, UK</p>
+                    <p>ORCID: 0000-0002-6787-8892</p>
+                    <p>✉️ D.Kontziampasis@leeds.ac.uk</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Bruno Alexandre de Sousa Alves, Abdel-Hamid Soliman, Dimitrios Kontziampasis. All rights reserved.</p>
+            <p>Open-source software available under MIT License | <a href="https://github.com/BrunoMarshall/desousaalves-powder-ratio-model">GitHub Repository</a></p>
+        </div>
+    </footer>
+
+    <script src="markov-model.js"></script>
+    <script src="calculator.js"></script>
+</body>
+</html>

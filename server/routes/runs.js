@@ -95,4 +95,28 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// ─── Delete a run ─────────────────────────────────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  const db = req.app.locals.db;
+  try {
+    // Only allow deletion of own machine's runs
+    const check = await db.query(
+      'SELECT id, machine_id FROM runs WHERE id = $1',
+      [req.params.id]
+    );
+    if (!check.rows.length) {
+      return res.status(404).json({ error: 'Run not found' });
+    }
+    if (check.rows[0].machine_id !== req.operator.machine_id && req.operator.role !== 'admin') {
+      return res.status(403).json({ error: 'Not authorized to delete this run' });
+    }
+
+    await db.query('DELETE FROM runs WHERE id = $1', [req.params.id]);
+    res.json({ deleted: true, id: parseInt(req.params.id) });
+  } catch (err) {
+    console.error('runs DELETE error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

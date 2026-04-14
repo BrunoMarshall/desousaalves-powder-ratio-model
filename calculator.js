@@ -1,28 +1,29 @@
 /**
- * Interactive Calculator Interface v3.1
- * - Machine-isolated powder history (Fuse runs never mix with EOS runs)
- * - Machine selector in login/register modal
- * - History panel shows only the logged-in operator's machine runs
- * - π(0) computed exclusively from the current machine's history
+ * Interactive Calculator Interface v4.0
+ * - Separate Login / Register tabs (no auto-register)
+ * - First name + Last name in register
+ * - Nav shows "Last, First"
+ * - Multi-machine selection in register (shared powder pools)
+ * - Machine management panel (add/remove machines when logged in)
+ * - π(0) and history computed across all operator's machines
  */
 
 const API_BASE = 'https://api.desousaalves-powder-ratio-model.com';
 
-// Machine list — order matches DB ids (1-5)
 const MACHINES = [
-    { id: 1, key: 'formlabs-fuse1-30w', name: 'Formlabs Fuse 1+ 30W',      chamberVolume: 8.17,  packingDensity: 29 },
-    { id: 2, key: 'eos-p770',           name: 'EOS P770',                   chamberVolume: 154,   packingDensity: 10 },
-    { id: 3, key: 'eos-p396',           name: 'EOS P396',                   chamberVolume: 89,    packingDensity: 11 },
-    { id: 4, key: '3dsystems-spro60',   name: '3D Systems sPro 60',         chamberVolume: 68,    packingDensity: 12 },
-    { id: 5, key: 'hp-mjf5200',         name: 'HP Multi Jet Fusion 5200',   chamberVolume: 116,   packingDensity: 13 },
+    { id: 1, key: 'formlabs-fuse1-30w', name: 'Formlabs Fuse 1+ 30W',    chamberVolume: 8.17,  packingDensity: 29 },
+    { id: 2, key: 'eos-p770',           name: 'EOS P770',                 chamberVolume: 154,   packingDensity: 10 },
+    { id: 3, key: 'eos-p396',           name: 'EOS P396',                 chamberVolume: 89,    packingDensity: 11 },
+    { id: 4, key: '3dsystems-spro60',   name: '3D Systems sPro 60',       chamberVolume: 68,    packingDensity: 12 },
+    { id: 5, key: 'hp-mjf5200',         name: 'HP Multi Jet Fusion 5200', chamberVolume: 116,   packingDensity: 13 },
 ];
 
-function getMachineById(id)  { return MACHINES.find(m => m.id  === parseInt(id)) || null; }
-function getMachineByKey(key){ return MACHINES.find(m => m.key === key)           || null; }
+function getMachineById(id)   { return MACHINES.find(m => m.id  === parseInt(id))  || null; }
+function getMachineByKey(key) { return MACHINES.find(m => m.key === key)            || null; }
 
 const model = new MarkovPowderModel();
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── App state ─────────────────────────────────────────────────────────────────
 let authToken    = localStorage.getItem('sls_token')    || null;
 let operatorInfo = JSON.parse(localStorage.getItem('sls_operator') || 'null');
 let buildHistory = [];
@@ -38,136 +39,220 @@ const buildsPerYearInput    = document.getElementById('builds-per-year');
 const calculateBtn          = document.getElementById('calculate-btn');
 const resultsContent        = document.getElementById('results-content');
 
-// ── Helper: current machine from operator or UI selector ──────────────────────
-function currentMachineId() {
-    if (authToken && operatorInfo?.machine_id) return operatorInfo.machine_id;
-    // Fall back to whatever is selected in the calculator UI
-    const m = getMachineByKey(machineSelect.value);
-    return m ? m.id : null;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function displayName(op) {
+    if (!op) return '';
+    const ln = op.last_name  || '';
+    const fn = op.first_name || op.username || '';
+    return ln ? `${ln}, ${fn}` : fn;
+}
+
+function machineIdsParam(ids) {
+    return ids && ids.length ? `machine_ids=${ids.join(',')}` : '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// LOGIN MODAL
+// MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function injectHeaderLogin() {
     const nav = document.querySelector('header nav');
     if (!nav) return;
 
-    // Nav link
     const loginLink = document.createElement('a');
     loginLink.id = 'nav-login-btn';
     loginLink.href = '#';
-    loginLink.style.cssText = 'font-weight:600;color:#f0a500;';
-    loginLink.addEventListener('click', e => { e.preventDefault(); toggleLoginModal(); });
+    loginLink.style.cssText = 'font-weight:600;color:#f0a500;white-space:nowrap;';
+    loginLink.addEventListener('click', e => { e.preventDefault(); toggleModal(); });
     nav.appendChild(loginLink);
 
-    // Machine options HTML
-    const machineOptions = MACHINES.map(m =>
-        `<option value="${m.id}">${m.name}</option>`
-    ).join('');
+    // Build machine checkboxes for register form
+    const machineCheckboxes = MACHINES.map(m => `
+        <label style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;
+                      cursor:pointer;font-size:0.88rem;color:#333;">
+            <input type="checkbox" name="reg-machine" value="${m.id}"
+                style="width:15px;height:15px;cursor:pointer;accent-color:#1a4d7a;">
+            ${m.name}
+        </label>
+    `).join('');
 
-    // Modal
     const modal = document.createElement('div');
-    modal.id = 'login-modal';
+    modal.id = 'auth-modal';
     modal.style.cssText = `
         display:none;position:fixed;top:0;left:0;width:100%;height:100%;
         background:rgba(0,0,0,0.55);z-index:9999;
-        align-items:center;justify-content:center;
+        align-items:flex-start;justify-content:center;padding-top:60px;
+        overflow-y:auto;box-sizing:border-box;
     `;
     modal.innerHTML = `
-        <div style="background:#fff;border-radius:10px;padding:2rem;width:100%;max-width:400px;
-                    box-shadow:0 20px 60px rgba(0,0,0,0.3);position:relative;">
+      <div style="background:#fff;border-radius:10px;padding:2rem;width:100%;max-width:420px;
+                  box-shadow:0 20px 60px rgba(0,0,0,0.3);position:relative;margin-bottom:2rem;">
 
-            <button onclick="toggleLoginModal()" style="position:absolute;top:1rem;right:1rem;
-                background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1;">×</button>
+        <button onclick="toggleModal()" style="position:absolute;top:1rem;right:1rem;
+            background:none;border:none;font-size:1.5rem;cursor:pointer;color:#aaa;line-height:1;">×</button>
 
-            <h3 style="margin:0 0 0.2rem;color:#1a4d7a;font-size:1.3rem;">Data-Driven Mode</h3>
-            <p style="margin:0 0 1.4rem;font-size:0.87rem;color:#666;">
-                Each machine keeps its own powder history. π(0) is computed only
-                from builds on <em>your</em> machine — never mixed with other machines.
-            </p>
+        <!-- ── Logged-in view ── -->
+        <div id="modal-loggedin" style="display:none;">
+            <p id="modal-greeting" style="color:#1a4d7a;font-weight:700;font-size:1.15rem;margin:0 0 0.15rem;"></p>
+            <p id="modal-machines-summary" style="color:#555;font-size:0.88rem;margin:0 0 1.4rem;"></p>
 
-            <!-- ── Login / Register form ── -->
-            <div id="login-form-inner">
-                <div style="margin-bottom:0.7rem;">
-                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Username</label>
-                    <input id="login-username" type="text" placeholder="your username"
-                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
-                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;outline:none;">
+            <div style="border:1px solid #e8edf2;border-radius:8px;padding:1rem;margin-bottom:1.2rem;">
+                <p style="margin:0 0 0.6rem;font-size:0.88rem;font-weight:600;color:#333;">
+                    Your Powder Pool — Machines
+                    <span style="font-weight:400;color:#888;font-size:0.8rem;">(history shared within pool)</span>
+                </p>
+                <div id="modal-machine-list"></div>
+                <div style="margin-top:0.75rem;display:flex;gap:0.5rem;align-items:center;">
+                    <select id="modal-add-machine-sel"
+                        style="flex:1;padding:0.45rem 0.6rem;border:1px solid #ddd;border-radius:5px;font-size:0.88rem;">
+                        <option value="">Add a machine…</option>
+                        ${MACHINES.map(m => `<option value="${m.id}">${m.name}</option>`).join('')}
+                    </select>
+                    <button onclick="addMachine()"
+                        style="padding:0.45rem 0.9rem;background:#1a4d7a;color:white;border:none;
+                               border-radius:5px;font-size:0.88rem;cursor:pointer;white-space:nowrap;">
+                        + Add
+                    </button>
                 </div>
-                <div style="margin-bottom:0.7rem;">
-                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Password</label>
-                    <input id="login-password" type="password" placeholder="password (min 8 chars)"
+                <p id="modal-machine-error" style="color:#e74c3c;font-size:0.82rem;margin:0.4rem 0 0;display:none;"></p>
+            </div>
+
+            <button onclick="doLogout()"
+                style="width:100%;padding:0.6rem;border:1px solid #ddd;border-radius:6px;
+                       background:white;cursor:pointer;font-size:0.9rem;color:#555;">
+                Sign Out
+            </button>
+        </div>
+
+        <!-- ── Auth forms view ── -->
+        <div id="modal-authforms">
+            <h3 style="margin:0 0 1.2rem;color:#1a4d7a;font-size:1.25rem;">Operator Access</h3>
+
+            <!-- Tabs -->
+            <div style="display:flex;border-bottom:2px solid #e8edf2;margin-bottom:1.4rem;">
+                <button id="tab-login" onclick="switchTab('login')"
+                    style="flex:1;padding:0.55rem;background:none;border:none;cursor:pointer;
+                           font-size:0.95rem;font-weight:600;color:#1a4d7a;
+                           border-bottom:2px solid #1a4d7a;margin-bottom:-2px;">
+                    Sign In
+                </button>
+                <button id="tab-register" onclick="switchTab('register')"
+                    style="flex:1;padding:0.55rem;background:none;border:none;cursor:pointer;
+                           font-size:0.95rem;font-weight:600;color:#aaa;border-bottom:2px solid transparent;
+                           margin-bottom:-2px;">
+                    Register New User
+                </button>
+            </div>
+
+            <!-- Login panel -->
+            <div id="panel-login">
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Username</label>
+                    <input id="login-username" type="text" placeholder="your username" autocomplete="username"
                         style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
-                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;outline:none;">
+                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;">
                 </div>
                 <div style="margin-bottom:1rem;">
-                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">
-                        Your SLS Machine
-                        <span style="font-weight:400;color:#888;font-size:0.8rem;">(new users — choose your machine)</span>
-                    </label>
-                    <select id="login-machine"
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Password</label>
+                    <input id="login-password" type="password" placeholder="password" autocomplete="current-password"
                         style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
-                               border:1px solid #ddd;border-radius:6px;font-size:0.92rem;outline:none;background:#fff;">
-                        ${machineOptions}
-                    </select>
-                    <p style="margin:0.3rem 0 0;font-size:0.78rem;color:#aaa;">
-                        Existing users: your machine is already stored — this field is ignored on login.
-                    </p>
+                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;">
                 </div>
-                <p id="login-error" style="color:#e74c3c;font-size:0.85rem;margin:0 0 0.7rem;display:none;"></p>
+                <p id="login-error" style="color:#e74c3c;font-size:0.85rem;margin:0 0 0.75rem;display:none;"></p>
                 <button id="do-login-btn"
                     style="width:100%;padding:0.72rem;background:#1a4d7a;color:white;border:none;
                            border-radius:6px;font-size:1rem;font-weight:600;cursor:pointer;">
-                    Sign In / Register
+                    Sign In
                 </button>
-                <p style="font-size:0.78rem;color:#aaa;text-align:center;margin:0.6rem 0 0;">
-                    New users are registered automatically with the selected machine.
-                </p>
             </div>
 
-            <!-- ── Logged-in state ── -->
-            <div id="logged-in-inner" style="display:none;text-align:center;">
-                <div style="font-size:2.2rem;margin-bottom:0.4rem;">✓</div>
-                <p id="modal-welcome"      style="color:#27ae60;font-weight:600;font-size:1.05rem;margin:0 0 0.2rem;"></p>
-                <p id="modal-machine-name" style="color:#1a4d7a;font-size:0.92rem;font-weight:600;margin:0 0 0.2rem;"></p>
-                <p id="modal-machine-note" style="color:#888;font-size:0.82rem;margin:0 0 1.4rem;">
-                    History &amp; π(0) are isolated to this machine only.
-                </p>
-                <button onclick="doLogout()" style="padding:0.55rem 1.4rem;border:1px solid #ddd;
-                    border-radius:6px;background:white;cursor:pointer;font-size:0.9rem;color:#555;">
-                    Sign Out
+            <!-- Register panel -->
+            <div id="panel-register" style="display:none;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.7rem;">
+                    <div>
+                        <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">First Name</label>
+                        <input id="reg-firstname" type="text" placeholder="First"
+                            style="width:100%;box-sizing:border-box;padding:0.6rem 0.65rem;
+                                   border:1px solid #ddd;border-radius:6px;font-size:0.92rem;">
+                    </div>
+                    <div>
+                        <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Last Name</label>
+                        <input id="reg-lastname" type="text" placeholder="Last"
+                            style="width:100%;box-sizing:border-box;padding:0.6rem 0.65rem;
+                                   border:1px solid #ddd;border-radius:6px;font-size:0.92rem;">
+                    </div>
+                </div>
+                <div style="margin-bottom:0.7rem;">
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Username</label>
+                    <input id="reg-username" type="text" placeholder="choose a username" autocomplete="off"
+                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
+                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;">
+                </div>
+                <div style="margin-bottom:0.7rem;">
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Password</label>
+                    <input id="reg-password" type="password" placeholder="min 8 characters" autocomplete="new-password"
+                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
+                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;">
+                </div>
+                <div style="margin-bottom:0.7rem;">
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Confirm Password</label>
+                    <input id="reg-password2" type="password" placeholder="repeat password" autocomplete="new-password"
+                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;
+                               border:1px solid #ddd;border-radius:6px;font-size:0.95rem;">
+                </div>
+                <div style="margin-bottom:1rem;">
+                    <label style="font-size:0.84rem;font-weight:600;display:block;margin-bottom:0.4rem;color:#333;">
+                        SLS Machine(s)
+                        <span style="font-weight:400;color:#888;font-size:0.79rem;">
+                            — select all that share the same powder
+                        </span>
+                    </label>
+                    <div style="border:1px solid #ddd;border-radius:6px;padding:0.5rem 0.75rem;background:#fafafa;">
+                        ${machineCheckboxes}
+                    </div>
+                    <p style="margin:0.3rem 0 0;font-size:0.78rem;color:#888;">
+                        e.g. tick both EOS P770 and EOS P396 if they share powder.
+                    </p>
+                </div>
+                <p id="reg-error" style="color:#e74c3c;font-size:0.85rem;margin:0 0 0.75rem;display:none;"></p>
+                <button id="do-register-btn"
+                    style="width:100%;padding:0.72rem;background:#1a6b3a;color:white;border:none;
+                           border-radius:6px;font-size:1rem;font-weight:600;cursor:pointer;">
+                    Create Account
                 </button>
             </div>
         </div>
+
+      </div>
     `;
     document.body.appendChild(modal);
-    modal.addEventListener('click', e => { if (e.target === modal) toggleLoginModal(); });
-
-    // Pre-select the machine that matches the calculator dropdown
-    syncLoginMachineDropdown();
-    machineSelect.addEventListener('change', syncLoginMachineDropdown);
+    modal.addEventListener('click', e => { if (e.target === modal) toggleModal(); });
 
     document.getElementById('do-login-btn').addEventListener('click', doLogin);
     document.getElementById('login-password').addEventListener('keydown', e => {
         if (e.key === 'Enter') doLogin();
     });
+    document.getElementById('do-register-btn').addEventListener('click', doRegister);
+    document.getElementById('reg-password2').addEventListener('keydown', e => {
+        if (e.key === 'Enter') doRegister();
+    });
 
     updateNavLoginBtn();
 }
 
-function syncLoginMachineDropdown() {
-    const sel = document.getElementById('login-machine');
-    if (!sel) return;
-    const m = getMachineByKey(machineSelect.value);
-    if (m) sel.value = m.id;
-}
-
-function toggleLoginModal() {
-    const modal = document.getElementById('login-modal');
+function toggleModal() {
+    const modal = document.getElementById('auth-modal');
     const isOpen = modal.style.display === 'flex';
     modal.style.display = isOpen ? 'none' : 'flex';
+}
+
+function switchTab(tab) {
+    document.getElementById('panel-login').style.display    = tab === 'login'    ? 'block' : 'none';
+    document.getElementById('panel-register').style.display = tab === 'register' ? 'block' : 'none';
+    document.getElementById('tab-login').style.color        = tab === 'login'    ? '#1a4d7a' : '#aaa';
+    document.getElementById('tab-register').style.color     = tab === 'register' ? '#1a4d7a' : '#aaa';
+    document.getElementById('tab-login').style.borderBottomColor    = tab === 'login'    ? '#1a4d7a' : 'transparent';
+    document.getElementById('tab-register').style.borderBottomColor = tab === 'register' ? '#1a4d7a' : 'transparent';
 }
 
 function updateNavLoginBtn() {
@@ -175,42 +260,71 @@ function updateNavLoginBtn() {
     if (!btn) return;
 
     if (authToken && operatorInfo) {
-        const machine = getMachineById(operatorInfo.machine_id);
-        btn.textContent = `● ${operatorInfo.username}`;
+        btn.textContent = displayName(operatorInfo);
         btn.style.color = '#27ae60';
-
-        const formInner   = document.getElementById('login-form-inner');
-        const loggedInner = document.getElementById('logged-in-inner');
-        const welcome     = document.getElementById('modal-welcome');
-        const machineName = document.getElementById('modal-machine-name');
-
-        if (formInner)   formInner.style.display   = 'none';
-        if (loggedInner) loggedInner.style.display  = 'block';
-        if (welcome)     welcome.textContent     = `Logged in as ${operatorInfo.username}`;
-        if (machineName) machineName.textContent = machine ? `Machine: ${machine.name}` : 'No machine linked';
+        // Show logged-in panel
+        document.getElementById('modal-authforms').style.display = 'none';
+        document.getElementById('modal-loggedin').style.display  = 'block';
+        document.getElementById('modal-greeting').textContent =
+            `Welcome, ${displayName(operatorInfo)}`;
+        renderModalMachineList();
+        updateModalMachinesSummary();
     } else {
         btn.textContent = 'Sign In';
         btn.style.color = '#f0a500';
-        const formInner   = document.getElementById('login-form-inner');
-        const loggedInner = document.getElementById('logged-in-inner');
-        if (formInner)   formInner.style.display   = 'block';
-        if (loggedInner) loggedInner.style.display  = 'none';
+        const authforms = document.getElementById('modal-authforms');
+        const loggedin  = document.getElementById('modal-loggedin');
+        if (authforms) authforms.style.display = 'block';
+        if (loggedin)  loggedin.style.display  = 'none';
     }
 }
 
+function updateModalMachinesSummary() {
+    const el = document.getElementById('modal-machines-summary');
+    if (!el || !operatorInfo?.machines) return;
+    const names = operatorInfo.machines.map(m => m.name).join(' + ');
+    el.textContent = `Powder pool: ${names}`;
+}
+
+function renderModalMachineList() {
+    const list = document.getElementById('modal-machine-list');
+    if (!list || !operatorInfo?.machines) return;
+    const machines = operatorInfo.machines;
+
+    list.innerHTML = machines.map(m => `
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:0.3rem 0;border-bottom:1px solid #f0f0f0;">
+            <span style="font-size:0.88rem;color:#333;">
+                ${m.is_primary ? '★ ' : ''}${m.name}
+            </span>
+            ${machines.length > 1 ? `
+            <button onclick="removeMachine(${m.id})"
+                style="background:none;border:none;color:#e74c3c;cursor:pointer;
+                       font-size:0.8rem;padding:0 0.3rem;">
+                Remove
+            </button>` : `<span style="font-size:0.75rem;color:#aaa;">primary</span>`}
+        </div>
+    `).join('');
+
+    // Filter add-machine dropdown to not show already linked machines
+    const linkedIds = machines.map(m => m.id);
+    const sel = document.getElementById('modal-add-machine-sel');
+    if (sel) {
+        Array.from(sel.options).forEach(opt => {
+            if (opt.value) opt.disabled = linkedIds.includes(parseInt(opt.value));
+        });
+    }
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
 async function doLogin() {
-    const username  = document.getElementById('login-username').value.trim();
-    const password  = document.getElementById('login-password').value;
-    const machineId = parseInt(document.getElementById('login-machine').value);
-    const errEl     = document.getElementById('login-error');
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errEl    = document.getElementById('login-error');
     errEl.style.display = 'none';
 
     if (!username || !password) {
-        errEl.textContent = 'Please enter username and password.';
-        errEl.style.display = 'block'; return;
-    }
-    if (!machineId) {
-        errEl.textContent = 'Please select your SLS machine.';
+        errEl.textContent = 'Please enter your username and password.';
         errEl.style.display = 'block'; return;
     }
 
@@ -218,65 +332,117 @@ async function doLogin() {
     btn.textContent = 'Signing in…'; btn.disabled = true;
 
     try {
-        // Attempt login
-        let res = await fetch(`${API_BASE}/api/auth/login`, {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
         });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Login failed');
 
-        if (res.status === 401) {
-            // New user — register with chosen machine
-            const regRes = await fetch(`${API_BASE}/api/auth/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, machine_id: machineId }),
-            });
-            if (!regRes.ok) {
-                const d = await regRes.json();
-                throw new Error(d.error || 'Registration failed');
-            }
-            // Now login
-            res = await fetch(`${API_BASE}/api/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-        }
-
-        if (!res.ok) {
-            const d = await res.json();
-            throw new Error(d.error || 'Login failed');
-        }
-
-        const data   = await res.json();
-        authToken    = data.token;
-        operatorInfo = data.operator;
-        localStorage.setItem('sls_token',    authToken);
-        localStorage.setItem('sls_operator', JSON.stringify(operatorInfo));
-
-        // Sync the calculator machine dropdown to the logged-in machine
-        const machine = getMachineById(operatorInfo.machine_id);
-        if (machine) {
-            machineSelect.value       = machine.key;
-            packingDensityInput.value = machine.packingDensity;
-            chamberVolumeInput.value  = machine.chamberVolume;
-        }
-
-        updateNavLoginBtn();
-        updateCalculateBtn();
-        await loadInitialState();
-        await loadHistory();
-        renderHistoryPanel();
-
-        setTimeout(() => toggleLoginModal(), 700);
-
+        onLoginSuccess(data);
+        setTimeout(() => toggleModal(), 700);
     } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
     } finally {
-        btn.textContent = 'Sign In / Register'; btn.disabled = false;
+        btn.textContent = 'Sign In'; btn.disabled = false;
     }
+}
+
+// ── Register ──────────────────────────────────────────────────────────────────
+async function doRegister() {
+    const firstName = document.getElementById('reg-firstname').value.trim();
+    const lastName  = document.getElementById('reg-lastname').value.trim();
+    const username  = document.getElementById('reg-username').value.trim();
+    const password  = document.getElementById('reg-password').value;
+    const password2 = document.getElementById('reg-password2').value;
+    const errEl     = document.getElementById('reg-error');
+    errEl.style.display = 'none';
+
+    const checkedMachines = Array.from(
+        document.querySelectorAll('input[name="reg-machine"]:checked')
+    ).map(cb => parseInt(cb.value));
+
+    if (!firstName || !lastName) {
+        errEl.textContent = 'Please enter your first and last name.';
+        errEl.style.display = 'block'; return;
+    }
+    if (!username) {
+        errEl.textContent = 'Please choose a username.';
+        errEl.style.display = 'block'; return;
+    }
+    if (password.length < 8) {
+        errEl.textContent = 'Password must be at least 8 characters.';
+        errEl.style.display = 'block'; return;
+    }
+    if (password !== password2) {
+        errEl.textContent = 'Passwords do not match.';
+        errEl.style.display = 'block'; return;
+    }
+    if (!checkedMachines.length) {
+        errEl.textContent = 'Please select at least one SLS machine.';
+        errEl.style.display = 'block'; return;
+    }
+
+    const btn = document.getElementById('do-register-btn');
+    btn.textContent = 'Creating account…'; btn.disabled = true;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                password,
+                first_name:  firstName,
+                last_name:   lastName,
+                machine_ids: checkedMachines,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Registration failed');
+
+        // Auto-login after successful registration
+        const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const loginData = await loginRes.json();
+        if (!loginRes.ok) throw new Error(loginData.error || 'Login after register failed');
+
+        onLoginSuccess(loginData);
+        setTimeout(() => toggleModal(), 700);
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+    } finally {
+        btn.textContent = 'Create Account'; btn.disabled = false;
+    }
+}
+
+function onLoginSuccess(data) {
+    authToken    = data.token;
+    operatorInfo = data.operator;
+    localStorage.setItem('sls_token',    authToken);
+    localStorage.setItem('sls_operator', JSON.stringify(operatorInfo));
+
+    // Sync calculator to primary machine
+    const primary = operatorInfo.machines?.find(m => m.is_primary) || operatorInfo.machines?.[0];
+    if (primary) {
+        const cfg = getMachineById(primary.id);
+        if (cfg) {
+            machineSelect.value       = cfg.key;
+            packingDensityInput.value = cfg.packingDensity;
+            chamberVolumeInput.value  = cfg.chamberVolume;
+        }
+    }
+
+    updateNavLoginBtn();
+    updateCalculateBtn();
+    loadInitialState();
+    loadHistory().then(renderHistoryPanel);
 }
 
 function doLogout() {
@@ -291,7 +457,77 @@ function doLogout() {
     updateCalculateBtn();
     renderHistoryPanel();
     updatePi0Badge(null);
-    toggleLoginModal();
+    toggleModal();
+}
+
+// ── Machine management (logged-in panel) ──────────────────────────────────────
+async function addMachine() {
+    const sel = document.getElementById('modal-add-machine-sel');
+    const mid = parseInt(sel.value);
+    const errEl = document.getElementById('modal-machine-error');
+    errEl.style.display = 'none';
+
+    if (!mid) {
+        errEl.textContent = 'Please select a machine to add.';
+        errEl.style.display = 'block'; return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/machines`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ machine_id: mid }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to add machine');
+
+        operatorInfo.machines    = data.machines;
+        operatorInfo.machine_ids = data.machines.map(m => m.id);
+        localStorage.setItem('sls_operator', JSON.stringify(operatorInfo));
+
+        sel.value = '';
+        renderModalMachineList();
+        updateModalMachinesSummary();
+        await loadInitialState();
+        await loadHistory();
+        renderHistoryPanel();
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+    }
+}
+
+async function removeMachine(machineId) {
+    const machine = getMachineById(machineId);
+    if (!confirm(`Remove ${machine?.name || 'this machine'} from your powder pool?`)) return;
+
+    const errEl = document.getElementById('modal-machine-error');
+    errEl.style.display = 'none';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/machines/${machineId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to remove machine');
+
+        operatorInfo.machines    = data.machines;
+        operatorInfo.machine_ids = data.machines.map(m => m.id);
+        localStorage.setItem('sls_operator', JSON.stringify(operatorInfo));
+
+        renderModalMachineList();
+        updateModalMachinesSummary();
+        await loadInitialState();
+        await loadHistory();
+        renderHistoryPanel();
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -309,39 +545,61 @@ function updateCalculateBtn() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// π(0) BADGE — always filtered to current machine
+// π(0) BADGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function loadInitialState() {
-    if (!authToken || !operatorInfo?.machine_id) return;
-    const data = await model.loadHistoricalState(API_BASE, authToken, operatorInfo.machine_id);
+    if (!authToken || !operatorInfo?.machine_ids?.length) return;
+    const data = await model.loadHistoricalState(
+        API_BASE, authToken,
+        operatorInfo.machine_ids[0],       // primary for the API call
+        operatorInfo.machine_ids           // all IDs passed as extra param
+    );
     updatePi0Badge(data);
 }
+
+// Override loadHistoricalState to support multi-machine
+MarkovPowderModel.prototype.loadHistoricalState = async function(apiBase, token, _primaryId, allIds) {
+    try {
+        const ids = allIds || [_primaryId];
+        const url = `${apiBase}/api/history/initial-state?${machineIdsParam(ids)}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data = await res.json();
+        this.pi0         = data.pi0;
+        this.pi0Source   = data.source;
+        this.pi0RunsUsed = data.runs_used;
+        return data;
+    } catch (err) {
+        console.warn('Could not load historical state:', err.message);
+        return null;
+    }
+};
 
 function updatePi0Badge(data) {
     const badge = document.getElementById('pi0-badge');
     if (!badge) return;
 
     if (data && data.source === 'empirical_history') {
-        const machine = getMachineById(operatorInfo?.machine_id);
+        const machineLabel = data.machine_names?.join(' + ') || '';
         const pct = data.pi0.map((v, i) =>
             `<span style="margin-right:6px"><strong>${['S₀','S₁','S₂','S₃','S₄'][i]}:</strong>${(v*100).toFixed(1)}%</span>`
         ).join('');
         badge.innerHTML = `
-            <span style="color:#27ae60;font-weight:600;">
-                ✓ Data-driven π(0) — ${data.runs_used} builds recorded
-                ${machine ? `<span style="color:#1a4d7a;font-weight:400;font-size:0.85rem;margin-left:0.4rem;">(${machine.name} only)</span>` : ''}
-            </span>
+            <div>
+                <span style="color:#27ae60;font-weight:600;">✓ Data-driven π(0) — ${data.runs_used} builds</span>
+                ${machineLabel ? `<span style="color:#1a4d7a;font-size:0.84rem;margin-left:0.5rem;">(${machineLabel})</span>` : ''}
+            </div>
             <div style="margin-top:0.4rem;font-size:0.85rem;color:#555;">${pct}</div>
         `;
         badge.style.background  = '#f0fff4';
         badge.style.borderColor = '#b2dfdb';
     } else if (authToken) {
-        badge.innerHTML = `<span style="color:#888;">No builds recorded yet for this machine — using virgin initial state.</span>`;
+        badge.innerHTML = `<span style="color:#888;">No builds recorded yet — using virgin initial state assumption.</span>`;
         badge.style.background  = '#fffef0';
         badge.style.borderColor = '#e0d89a';
     } else {
-        badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode. Each machine has its own isolated powder history.</span>`;
+        badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode. Machines sharing the same powder can pool their history.</span>`;
         badge.style.background  = '#f8f9fa';
         badge.style.borderColor = '#dee2e6';
     }
@@ -357,12 +615,12 @@ function injectPi0Badge() {
         margin-bottom:1.25rem;font-size:0.9rem;background:#f8f9fa;
         transition:background 0.3s,border-color 0.3s;
     `;
-    badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode. Each machine has its own isolated powder history.</span>`;
+    badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode. Machines sharing the same powder can pool their history.</span>`;
     h2.insertAdjacentElement('afterend', badge);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BUILD HISTORY — machine-isolated
+// BUILD HISTORY
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function injectHistoryPanel() {
@@ -375,18 +633,17 @@ function injectHistoryPanel() {
             Build History
         </h3>
         <div id="history-content">
-            <p style="color:#888;font-style:italic;">Sign in to view your machine's build history.</p>
+            <p style="color:#888;font-style:italic;">Sign in to view your build history.</p>
         </div>
     `;
     calcSection.appendChild(panel);
 }
 
 async function loadHistory() {
-    if (!authToken || !operatorInfo?.machine_id) return;
+    if (!authToken || !operatorInfo?.machine_ids?.length) return;
     try {
-        // Always filter by the operator's machine_id — never load other machines
         const res = await fetch(
-            `${API_BASE}/api/runs?machine_id=${operatorInfo.machine_id}&limit=100`,
+            `${API_BASE}/api/runs?${machineIdsParam(operatorInfo.machine_ids)}&limit=100`,
             { headers: { Authorization: `Bearer ${authToken}` } }
         );
         if (!res.ok) return;
@@ -402,26 +659,22 @@ function renderHistoryPanel() {
     if (!content) return;
 
     if (!authToken) {
-        content.innerHTML = `<p style="color:#888;font-style:italic;">Sign in to view your machine's build history.</p>`;
+        content.innerHTML = `<p style="color:#888;font-style:italic;">Sign in to view your build history.</p>`;
         return;
     }
 
-    const machine = getMachineById(operatorInfo?.machine_id);
-    const machineLabel = machine
-        ? `<span style="display:inline-block;background:#e8f0fe;color:#1a4d7a;border-radius:4px;
-                        padding:2px 10px;font-size:0.82rem;font-weight:600;margin-left:0.5rem;">
-               ${machine.name}
-           </span>`
-        : '';
+    const machineLabel = operatorInfo?.machines?.map(m =>
+        `<span style="display:inline-block;background:#e8f0fe;color:#1a4d7a;border-radius:4px;
+                      padding:1px 8px;font-size:0.8rem;font-weight:600;margin-right:4px;">
+            ${m.name}
+         </span>`
+    ).join('') || '';
 
     if (buildHistory.length === 0) {
         content.innerHTML = `
-            <p style="color:#888;margin-bottom:0.25rem;">
-                No builds recorded yet for ${machineLabel}
-            </p>
+            <p style="color:#888;margin-bottom:0.3rem;">No builds recorded yet for ${machineLabel}</p>
             <p style="color:#aaa;font-size:0.88rem;">
-                Use "Calculate &amp; Save to History" to start building your powder history.
-                Each machine's history is completely isolated.
+                Click "Calculate &amp; Save to History" after each build to start tracking.
             </p>`;
         return;
     }
@@ -430,28 +683,32 @@ function renderHistoryPanel() {
         const date    = new Date(run.created_at);
         const dateStr = date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
         const timeStr = date.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
-        const rho     = run.packing_density ? (parseFloat(run.packing_density) * 100).toFixed(1) + '%' : '—';
-        const alpha   = run.alpha_optimal   ? (parseFloat(run.alpha_optimal)   * 100).toFixed(1) + '%' : '—';
-        const q       = run.quality_result  ? parseFloat(run.quality_result).toFixed(3) : '—';
-        const s4      = run.degraded_frac   ? (parseFloat(run.degraded_frac)  * 100).toFixed(1) + '%' : '—';
-        const s4High  = run.degraded_frac && parseFloat(run.degraded_frac) > 0.12;
+        const machineName = getMachineById(run.machine_id)?.name || `Machine ${run.machine_id}`;
+        const rho   = run.packing_density ? (parseFloat(run.packing_density) * 100).toFixed(1) + '%' : '—';
+        const alpha = run.alpha_optimal   ? (parseFloat(run.alpha_optimal)   * 100).toFixed(1) + '%' : '—';
+        const q     = run.quality_result  ? parseFloat(run.quality_result).toFixed(3) : '—';
+        const s4    = run.degraded_frac   ? (parseFloat(run.degraded_frac)  * 100).toFixed(1) + '%' : '—';
+        const s4High = run.degraded_frac && parseFloat(run.degraded_frac) > 0.12;
 
         return `
             <tr style="border-bottom:1px solid #f0f0f0;">
-                <td style="padding:0.6rem 0.75rem;font-size:0.85rem;color:#555;white-space:nowrap;">
+                <td style="padding:0.55rem 0.6rem;font-size:0.82rem;color:#555;white-space:nowrap;">
                     ${dateStr}<br>
-                    <span style="color:#aaa;font-size:0.78rem;">${timeStr}</span>
+                    <span style="color:#bbb;font-size:0.76rem;">${timeStr}</span>
                 </td>
-                <td style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;">${rho}</td>
-                <td style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a6b3a;">${alpha}</td>
-                <td style="padding:0.6rem 0.75rem;text-align:center;">${q}</td>
-                <td style="padding:0.6rem 0.75rem;text-align:center;color:${s4High ? '#e74c3c' : '#555'};">
+                <td style="padding:0.55rem 0.6rem;font-size:0.8rem;color:#666;white-space:nowrap;">
+                    ${machineName}
+                </td>
+                <td style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;">${rho}</td>
+                <td style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a6b3a;">${alpha}</td>
+                <td style="padding:0.55rem 0.6rem;text-align:center;">${q}</td>
+                <td style="padding:0.55rem 0.6rem;text-align:center;color:${s4High ? '#e74c3c' : '#555'};">
                     ${s4}${s4High ? ' ⚠' : ''}
                 </td>
-                <td style="padding:0.6rem 0.75rem;text-align:center;">
+                <td style="padding:0.55rem 0.6rem;text-align:center;">
                     <button onclick="deleteRun(${run.id})"
                         style="background:#fee;border:1px solid #f5c6cb;color:#e74c3c;
-                               padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.8rem;"
+                               padding:0.2rem 0.55rem;border-radius:4px;cursor:pointer;font-size:0.78rem;"
                         onmouseover="this.style.background='#f5c6cb'"
                         onmouseout="this.style.background='#fee'">
                         Delete
@@ -462,29 +719,27 @@ function renderHistoryPanel() {
     }).join('');
 
     content.innerHTML = `
-        <div style="margin-bottom:0.75rem;font-size:0.88rem;color:#555;">
-            Showing powder history for ${machineLabel}
-            <span style="color:#aaa;margin-left:0.5rem;">
-                — runs from other machines are excluded from π(0) calculation
-            </span>
+        <div style="margin-bottom:0.6rem;font-size:0.87rem;color:#555;">
+            Powder pool: ${machineLabel}
         </div>
         <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
                 <thead>
                     <tr style="background:#f0f4f8;border-bottom:2px solid #dee2e6;">
-                        <th style="padding:0.6rem 0.75rem;text-align:left;  font-weight:600;color:#1a4d7a;">Date / Time</th>
-                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">ρ_pack</th>
-                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">α_opt</th>
-                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">Quality</th>
-                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">S₄ Frac.</th>
-                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">Action</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:left;  font-weight:600;color:#1a4d7a;">Date</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:left;  font-weight:600;color:#1a4d7a;">Machine</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a4d7a;">ρ_pack</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a4d7a;">α_opt</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a4d7a;">Quality</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a4d7a;">S₄</th>
+                        <th style="padding:0.55rem 0.6rem;text-align:center;font-weight:600;color:#1a4d7a;">Action</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
         </div>
-        <p style="margin-top:0.5rem;font-size:0.8rem;color:#aaa;">
-            ${buildHistory.length} build${buildHistory.length !== 1 ? 's' : ''} recorded for this machine — newest first
+        <p style="margin-top:0.5rem;font-size:0.78rem;color:#bbb;">
+            ${buildHistory.length} build${buildHistory.length !== 1 ? 's' : ''} — newest first
         </p>
     `;
 }
@@ -499,24 +754,20 @@ async function deleteRun(id) {
         if (!res.ok) throw new Error('Delete failed');
         buildHistory = buildHistory.filter(r => r.id !== id);
         renderHistoryPanel();
-        // Recompute π(0) without the deleted run
         await loadInitialState();
     } catch (e) {
         alert('Could not delete: ' + e.message);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MACHINE SELECTOR (calculator UI)
-// ═══════════════════════════════════════════════════════════════════════════════
-
+// ── Machine selector lock when logged in ──────────────────────────────────────
 machineSelect.addEventListener('change', () => {
-    // If logged in, don't let the dropdown override the linked machine
-    if (authToken && operatorInfo?.machine_id) {
-        const linked = getMachineById(operatorInfo.machine_id);
-        if (linked && machineSelect.value !== linked.key) {
-            machineSelect.value = linked.key; // snap back
-            showMachineLockWarning(linked.name);
+    if (authToken && operatorInfo?.machines?.length) {
+        const primary = operatorInfo.machines.find(m => m.is_primary) || operatorInfo.machines[0];
+        const cfg = getMachineById(primary.id);
+        if (cfg && machineSelect.value !== cfg.key) {
+            machineSelect.value = cfg.key;
+            showMachineLockWarning(operatorInfo.machines.map(m => m.name).join(' / '));
             return;
         }
     }
@@ -527,21 +778,18 @@ machineSelect.addEventListener('change', () => {
     }
 });
 
-function showMachineLockWarning(machineName) {
+function showMachineLockWarning(names) {
     let warn = document.getElementById('machine-lock-warn');
     if (!warn) {
         warn = document.createElement('div');
         warn.id = 'machine-lock-warn';
-        warn.style.cssText = `
-            font-size:0.82rem;color:#856404;background:#fff3cd;border:1px solid #ffc107;
-            border-radius:5px;padding:0.4rem 0.75rem;margin-top:0.4rem;
-            transition:opacity 0.5s;
-        `;
+        warn.style.cssText = `font-size:0.82rem;color:#856404;background:#fff3cd;border:1px solid #ffc107;
+            border-radius:5px;padding:0.4rem 0.75rem;margin-top:0.4rem;transition:opacity 0.5s;`;
         machineSelect.insertAdjacentElement('afterend', warn);
     }
-    warn.textContent = `Locked to ${machineName} while logged in. Sign out to switch machines.`;
+    warn.textContent = `Locked to ${names} while logged in. Manage machines from the Sign In menu.`;
     warn.style.opacity = '1';
-    setTimeout(() => { warn.style.opacity = '0'; }, 4000);
+    setTimeout(() => { warn.style.opacity = '0'; }, 5000);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -589,12 +837,9 @@ function showSaveBadge() {
     if (!badge) {
         badge = document.createElement('span');
         badge.id = 'save-confirm-badge';
-        badge.style.cssText = `
-            display:inline-block;margin-left:1rem;padding:0.3rem 0.75rem;
-            background:#e8f5e9;color:#27ae60;border-radius:4px;
-            font-size:0.85rem;font-weight:600;vertical-align:middle;
-            transition:opacity 0.5s;
-        `;
+        badge.style.cssText = `display:inline-block;margin-left:1rem;padding:0.3rem 0.75rem;
+            background:#e8f5e9;color:#27ae60;border-radius:4px;font-size:0.85rem;
+            font-weight:600;vertical-align:middle;transition:opacity 0.5s;`;
         calculateBtn.insertAdjacentElement('afterend', badge);
     }
     badge.textContent   = '✓ Saved to history';
@@ -603,6 +848,11 @@ function showSaveBadge() {
 }
 
 async function saveRun(packingDensity, alphaOptimal, chamberVol, qualityResult, degradedFrac) {
+    // Save against the primary machine
+    const primaryMachine = operatorInfo?.machines?.find(m => m.is_primary) || operatorInfo?.machines?.[0];
+    const mid = primaryMachine?.id || operatorInfo?.machine_id;
+    if (!mid) return;
+
     try {
         const res = await fetch(`${API_BASE}/api/runs`, {
             method: 'POST',
@@ -616,7 +866,7 @@ async function saveRun(packingDensity, alphaOptimal, chamberVol, qualityResult, 
                 chamber_vol:     chamberVol,
                 quality_result:  qualityResult,
                 degraded_frac:   degradedFrac,
-                machine_id:      operatorInfo.machine_id,   // always the operator's machine
+                machine_id:      mid,
             }),
         });
         if (!res.ok) return;
@@ -629,7 +879,7 @@ async function saveRun(packingDensity, alphaOptimal, chamberVol, qualityResult, 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RESULTS DISPLAY
+// RESULTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function displayResults(results, economics, inputs) {
@@ -665,20 +915,15 @@ function displayResults(results, economics, inputs) {
                 </span>
             </div>
         </div>
-        <div class="state-distribution">
-            <h4>Steady-State Powder Distribution</h4>
+        <div class="state-distribution"><h4>Steady-State Powder Distribution</h4>
     `;
 
     piStock.forEach((frac, i) => {
         const pct = (frac * 100).toFixed(1);
         html += `
             <div class="state-bar">
-                <div class="state-label">
-                    <span>${model.stateNames[i]}</span><span>${pct}%</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width:${pct}%"></div>
-                </div>
+                <div class="state-label"><span>${model.stateNames[i]}</span><span>${pct}%</span></div>
+                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
             </div>
         `;
     });
@@ -687,9 +932,7 @@ function displayResults(results, economics, inputs) {
         <div class="result-item" style="margin-top:1.5rem;">
             <h4>Economic Analysis</h4>
             <table class="comparison-table">
-                <thead>
-                    <tr><th>Strategy</th><th>Virgin Ratio</th><th>Annual Cost</th><th>Savings</th></tr>
-                </thead>
+                <thead><tr><th>Strategy</th><th>Virgin Ratio</th><th>Annual Cost</th><th>Savings</th></tr></thead>
                 <tbody>
                     <tr style="background:#f0fff4;">
                         <td><strong>Optimized (This Model)</strong></td>
@@ -729,23 +972,17 @@ function displayResults(results, economics, inputs) {
             </div>
         `;
     }
-
     resultsContent.innerHTML = html;
 }
 
 function displayErrors(errors) {
-    resultsContent.innerHTML = `
-        <div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
-            <h4 style="margin-top:0;">Input Validation Errors:</h4>
-            <ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>
-        </div>`;
+    resultsContent.innerHTML = `<div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
+        <h4 style="margin-top:0;">Input Validation Errors:</h4>
+        <ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul></div>`;
 }
-
 function displayError(msg) {
-    resultsContent.innerHTML = `
-        <div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
-            <strong>Error:</strong> ${msg}
-        </div>`;
+    resultsContent.innerHTML = `<div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
+        <strong>Error:</strong> ${msg}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -759,12 +996,14 @@ window.addEventListener('load', async () => {
     updateCalculateBtn();
 
     if (authToken && operatorInfo) {
-        // Sync calculator dropdown to the operator's linked machine
-        const machine = getMachineById(operatorInfo.machine_id);
-        if (machine) {
-            machineSelect.value       = machine.key;
-            packingDensityInput.value = machine.packingDensity;
-            chamberVolumeInput.value  = machine.chamberVolume;
+        const primary = operatorInfo.machines?.find(m => m.is_primary) || operatorInfo.machines?.[0];
+        if (primary) {
+            const cfg = getMachineById(primary.id);
+            if (cfg) {
+                machineSelect.value       = cfg.key;
+                packingDensityInput.value = cfg.packingDensity;
+                chamberVolumeInput.value  = cfg.chamberVolume;
+            }
         }
         updateNavLoginBtn();
         await loadInitialState();

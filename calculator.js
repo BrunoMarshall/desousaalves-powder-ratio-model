@@ -1,109 +1,145 @@
 /**
- * Interactive Calculator Interface v2.0
- * Adds: operator login, history recording, data-driven π(0)
+ * Interactive Calculator Interface v3.0
+ * - Login button integrated into header nav (top right)
+ * - Build history panel with date, delete entries
+ * - "Calculate & Save" single button
  */
 
 const API_BASE = 'https://api.desousaalves-powder-ratio-model.com';
 
 const machineConfigs = {
-    'formlabs-fuse1-30w': { name: 'Formlabs Fuse 1+ 30W', chamberVolume: 8.17,  packingDensity: 29, type: 'Desktop'    },
-    'eos-p770':           { name: 'EOS P770',               chamberVolume: 154,   packingDensity: 10, type: 'Industrial' },
-    'eos-p396':           { name: 'EOS P396',               chamberVolume: 89,    packingDensity: 11, type: 'Industrial' },
-    '3dsystems-spro60':   { name: '3D Systems sPro 60',     chamberVolume: 68,    packingDensity: 12, type: 'Industrial' },
-    'hp-mjf5200':         { name: 'HP Multi Jet Fusion 5200', chamberVolume: 116, packingDensity: 13, type: 'Industrial' },
+    'formlabs-fuse1-30w': { name: 'Formlabs Fuse 1+ 30W', chamberVolume: 8.17,  packingDensity: 29 },
+    'eos-p770':           { name: 'EOS P770',               chamberVolume: 154,   packingDensity: 10 },
+    'eos-p396':           { name: 'EOS P396',               chamberVolume: 89,    packingDensity: 11 },
+    '3dsystems-spro60':   { name: '3D Systems sPro 60',     chamberVolume: 68,    packingDensity: 12 },
+    'hp-mjf5200':         { name: 'HP Multi Jet Fusion 5200', chamberVolume: 116, packingDensity: 13 },
 };
 
 const model = new MarkovPowderModel();
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let authToken   = localStorage.getItem('sls_token')  || null;
+let authToken    = localStorage.getItem('sls_token')    || null;
 let operatorInfo = JSON.parse(localStorage.getItem('sls_operator') || 'null');
 let lastResults  = null;
+let buildHistory = [];
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const machineSelect        = document.getElementById('machine-select');
-const packingDensityInput  = document.getElementById('packing-density');
-const chamberVolumeInput   = document.getElementById('chamber-volume');
+const machineSelect         = document.getElementById('machine-select');
+const packingDensityInput   = document.getElementById('packing-density');
+const chamberVolumeInput    = document.getElementById('chamber-volume');
 const qualityThresholdInput = document.getElementById('quality-threshold');
-const degradedLimitInput   = document.getElementById('degraded-limit');
-const powderCostInput      = document.getElementById('powder-cost');
-const buildsPerYearInput   = document.getElementById('builds-per-year');
-const calculateBtn         = document.getElementById('calculate-btn');
-const resultsContent       = document.getElementById('results-content');
+const degradedLimitInput    = document.getElementById('degraded-limit');
+const powderCostInput       = document.getElementById('powder-cost');
+const buildsPerYearInput    = document.getElementById('builds-per-year');
+const calculateBtn          = document.getElementById('calculate-btn');
+const resultsContent        = document.getElementById('results-content');
 
-// Auth panel elements (injected below)
-let authPanel, loginStatus;
+// ── Inject login into header nav ──────────────────────────────────────────────
+function injectHeaderLogin() {
+    const nav = document.querySelector('header nav');
+    if (!nav) return;
 
-// ── Auth panel injection ──────────────────────────────────────────────────────
-function injectAuthPanel() {
-    const calcSection = document.getElementById('calculator');
-    const panel = document.createElement('div');
-    panel.id = 'auth-panel';
-    panel.style.cssText = 'background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;padding:1.2rem 1.5rem;margin-bottom:1.5rem;';
-    panel.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;">
-          <div>
-            <strong style="color:#1a4d7a;">Data-Driven Mode</strong>
-            <p style="margin:0.25rem 0 0;font-size:0.9rem;color:#555;">
-              Log in to use your build history for a data-driven initial state π(0)
-              rather than the standard virgin assumption.
+    const loginLink = document.createElement('a');
+    loginLink.id = 'nav-login-btn';
+    loginLink.href = '#';
+    loginLink.style.cssText = 'font-weight:600;color:#f0a500;';
+    loginLink.addEventListener('click', (e) => { e.preventDefault(); toggleLoginModal(); });
+    nav.appendChild(loginLink);
+
+    const modal = document.createElement('div');
+    modal.id = 'login-modal';
+    modal.style.cssText = `
+        display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+        background:rgba(0,0,0,0.55);z-index:9999;
+        align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:10px;padding:2rem;width:100%;max-width:380px;
+                    box-shadow:0 20px 60px rgba(0,0,0,0.3);position:relative;">
+            <button onclick="toggleLoginModal()" style="position:absolute;top:1rem;right:1rem;
+                background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1;">×</button>
+            <h3 style="margin:0 0 0.25rem;color:#1a4d7a;font-size:1.3rem;">Data-Driven Mode</h3>
+            <p style="margin:0 0 1.5rem;font-size:0.88rem;color:#666;">
+                Log in to record builds and compute π(0) from your machine's real history.
             </p>
-          </div>
-          <div id="auth-controls" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;"></div>
-        </div>
-        <div id="login-status" style="margin-top:0.75rem;font-size:0.9rem;"></div>
-        <div id="login-form" style="display:none;margin-top:1rem;display:none;">
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:0.5rem;align-items:end;">
-            <div>
-              <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:0.25rem;">Username</label>
-              <input id="login-username" type="text" placeholder="username" style="width:100%;padding:0.5rem;border:1px solid #dee2e6;border-radius:4px;">
+            <div id="login-form-inner">
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Username</label>
+                    <input id="login-username" type="text" placeholder="your username"
+                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;border:1px solid #ddd;
+                               border-radius:6px;font-size:0.95rem;outline:none;">
+                </div>
+                <div style="margin-bottom:1rem;">
+                    <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:0.3rem;color:#333;">Password</label>
+                    <input id="login-password" type="password" placeholder="password (min 8 chars)"
+                        style="width:100%;box-sizing:border-box;padding:0.6rem 0.75rem;border:1px solid #ddd;
+                               border-radius:6px;font-size:0.95rem;outline:none;">
+                </div>
+                <p id="login-error" style="color:#e74c3c;font-size:0.85rem;margin:0 0 0.75rem;display:none;"></p>
+                <button id="do-login-btn"
+                    style="width:100%;padding:0.7rem;background:#1a4d7a;color:white;border:none;
+                           border-radius:6px;font-size:1rem;font-weight:600;cursor:pointer;">
+                    Sign In / Register
+                </button>
+                <p style="font-size:0.8rem;color:#888;text-align:center;margin:0.75rem 0 0;">
+                    New users are registered automatically.
+                </p>
             </div>
-            <div>
-              <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:0.25rem;">Password</label>
-              <input id="login-password" type="password" placeholder="password" style="width:100%;padding:0.5rem;border:1px solid #dee2e6;border-radius:4px;">
+            <div id="logged-in-inner" style="display:none;text-align:center;">
+                <div style="font-size:2.5rem;margin-bottom:0.5rem;">✓</div>
+                <p style="color:#27ae60;font-weight:600;font-size:1.1rem;margin:0 0 0.25rem;" id="modal-welcome"></p>
+                <p style="color:#666;font-size:0.88rem;margin:0 0 1.5rem;" id="modal-machine-name"></p>
+                <button onclick="doLogout()" style="padding:0.6rem 1.5rem;border:1px solid #ddd;
+                    border-radius:6px;background:white;cursor:pointer;font-size:0.9rem;color:#555;">
+                    Sign Out
+                </button>
             </div>
-            <button id="do-login-btn" style="padding:0.5rem 1rem;background:#1a4d7a;color:white;border:none;border-radius:4px;cursor:pointer;">Sign in</button>
-          </div>
-          <p id="login-error" style="color:#e74c3c;font-size:0.85rem;margin-top:0.5rem;display:none;"></p>
         </div>
     `;
-    const h2 = calcSection.querySelector('h2');
-    calcSection.insertBefore(panel, h2.nextSibling);
-
-    authPanel    = panel;
-    loginStatus  = document.getElementById('login-status');
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) toggleLoginModal(); });
 
     document.getElementById('do-login-btn').addEventListener('click', doLogin);
     document.getElementById('login-password').addEventListener('keydown', e => {
         if (e.key === 'Enter') doLogin();
     });
 
-    renderAuthState();
+    updateNavLoginBtn();
 }
 
-function renderAuthState() {
-    const controls = document.getElementById('auth-controls');
-    const form     = document.getElementById('login-form');
+function toggleLoginModal() {
+    const modal = document.getElementById('login-modal');
+    const isOpen = modal.style.display === 'flex';
+    modal.style.display = isOpen ? 'none' : 'flex';
+}
 
+function updateNavLoginBtn() {
+    const btn = document.getElementById('nav-login-btn');
+    if (!btn) return;
     if (authToken && operatorInfo) {
-        controls.innerHTML = `
-            <span style="font-size:0.9rem;color:#27ae60;">● Logged in as <strong>${operatorInfo.username}</strong></span>
-            <button onclick="doLogout()" style="padding:0.4rem 0.8rem;font-size:0.85rem;border:1px solid #dee2e6;border-radius:4px;cursor:pointer;background:white;">Sign out</button>
-        `;
-        form.style.display = 'none';
-        loadHistoryBadge();
+        btn.textContent = `● ${operatorInfo.username}`;
+        btn.style.color = '#27ae60';
+        const formInner  = document.getElementById('login-form-inner');
+        const loggedInner = document.getElementById('logged-in-inner');
+        const welcome    = document.getElementById('modal-welcome');
+        const machineName = document.getElementById('modal-machine-name');
+        if (formInner)   formInner.style.display   = 'none';
+        if (loggedInner) loggedInner.style.display  = 'block';
+        if (welcome)     welcome.textContent = `Logged in as ${operatorInfo.username}`;
+        if (machineName) {
+            const machineKeys = Object.keys(machineConfigs);
+            const mid = operatorInfo.machine_id;
+            const cfg = mid ? machineConfigs[machineKeys[mid - 1]] : null;
+            machineName.textContent = cfg ? cfg.name : 'No machine linked';
+        }
     } else {
-        controls.innerHTML = `
-            <button onclick="toggleLoginForm()" style="padding:0.4rem 0.9rem;font-size:0.9rem;background:#1a4d7a;color:white;border:none;border-radius:4px;cursor:pointer;">Sign in / Register</button>
-        `;
-        form.style.display = 'none';
-        if (loginStatus) loginStatus.textContent = '';
+        btn.textContent = 'Sign In';
+        btn.style.color = '#f0a500';
+        const formInner  = document.getElementById('login-form-inner');
+        const loggedInner = document.getElementById('logged-in-inner');
+        if (formInner)   formInner.style.display   = 'block';
+        if (loggedInner) loggedInner.style.display  = 'none';
     }
-}
-
-function toggleLoginForm() {
-    const form = document.getElementById('login-form');
-    form.style.display = form.style.display === 'none' ? 'block' : 'none';
 }
 
 async function doLogin() {
@@ -118,8 +154,11 @@ async function doLogin() {
         return;
     }
 
+    const btn = document.getElementById('do-login-btn');
+    btn.textContent = 'Signing in…';
+    btn.disabled = true;
+
     try {
-        // Try login first; if 401, auto-register new operator
         let res = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -127,7 +166,6 @@ async function doLogin() {
         });
 
         if (res.status === 401) {
-            // New user — register automatically
             const regRes = await fetch(`${API_BASE}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -137,7 +175,6 @@ async function doLogin() {
                 const d = await regRes.json();
                 throw new Error(d.error || 'Registration failed');
             }
-            // Now login
             res = await fetch(`${API_BASE}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -150,48 +187,212 @@ async function doLogin() {
             throw new Error(d.error || 'Login failed');
         }
 
-        const data = await res.json();
+        const data   = await res.json();
         authToken    = data.token;
         operatorInfo = data.operator;
         localStorage.setItem('sls_token',    authToken);
         localStorage.setItem('sls_operator', JSON.stringify(operatorInfo));
-        renderAuthState();
+
+        updateNavLoginBtn();
+        updateCalculateBtn();
+        await loadInitialState();
+        await loadHistory();
+        renderHistoryPanel();
+
+        setTimeout(() => toggleLoginModal(), 800);
 
     } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
+    } finally {
+        btn.textContent = 'Sign In / Register';
+        btn.disabled = false;
     }
 }
 
 function doLogout() {
     authToken    = null;
     operatorInfo = null;
+    buildHistory = [];
     localStorage.removeItem('sls_token');
     localStorage.removeItem('sls_operator');
     model.pi0       = [1.0, 0.0, 0.0, 0.0, 0.0];
     model.pi0Source = 'assumed_virgin';
-    renderAuthState();
+    updateNavLoginBtn();
+    updateCalculateBtn();
+    renderHistoryPanel();
+    updatePi0Badge(null);
+    toggleLoginModal();
 }
 
-async function loadHistoryBadge() {
-    if (!authToken || !operatorInfo) return;
-    const mid = operatorInfo.machine_id;
-    if (!mid) {
-        loginStatus.innerHTML = `<span style="color:#f39c12;">⚠ No machine linked to your account yet. Results will use virgin initial state assumption.</span>`;
+// ── Calculate button label ────────────────────────────────────────────────────
+function updateCalculateBtn() {
+    if (authToken) {
+        calculateBtn.textContent = 'Calculate & Save to History';
+        calculateBtn.style.background = '#1a6b3a';
+    } else {
+        calculateBtn.textContent = 'Calculate Optimal Ratio';
+        calculateBtn.style.background = '';
+    }
+}
+
+// ── Load π(0) from history ────────────────────────────────────────────────────
+async function loadInitialState() {
+    if (!authToken || !operatorInfo?.machine_id) return;
+    const data = await model.loadHistoricalState(API_BASE, authToken, operatorInfo.machine_id);
+    updatePi0Badge(data);
+}
+
+function updatePi0Badge(data) {
+    const badge = document.getElementById('pi0-badge');
+    if (!badge) return;
+    if (data && data.source === 'empirical_history') {
+        const pct = data.pi0.map((v, i) =>
+            `<span style="margin-right:6px"><strong>${['S₀','S₁','S₂','S₃','S₄'][i]}:</strong>${(v*100).toFixed(1)}%</span>`
+        ).join('');
+        badge.innerHTML = `
+            <span style="color:#27ae60;font-weight:600;">✓ Data-driven π(0) — ${data.runs_used} recorded builds</span>
+            <div style="margin-top:0.4rem;font-size:0.85rem;color:#555;">${pct}</div>
+        `;
+        badge.style.background   = '#f0fff4';
+        badge.style.borderColor  = '#b2dfdb';
+    } else if (authToken) {
+        badge.innerHTML = `<span style="color:#888;">No build history yet — using virgin initial state assumption.</span>`;
+        badge.style.background  = '#fffef0';
+        badge.style.borderColor = '#e0d89a';
+    } else {
+        badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode.</span>`;
+        badge.style.background  = '#f8f9fa';
+        badge.style.borderColor = '#dee2e6';
+    }
+}
+
+// ── π(0) badge + history panel injection ─────────────────────────────────────
+function injectPi0Badge() {
+    const calcSection = document.getElementById('calculator');
+    const h2 = calcSection.querySelector('h2');
+    const badge = document.createElement('div');
+    badge.id = 'pi0-badge';
+    badge.style.cssText = `
+        padding:0.85rem 1.1rem;border-radius:7px;border:1px solid #dee2e6;
+        margin-bottom:1.25rem;font-size:0.9rem;background:#f8f9fa;
+        transition:background 0.3s,border-color 0.3s;
+    `;
+    badge.innerHTML = `<span style="color:#888;">Sign in to enable data-driven mode.</span>`;
+    h2.insertAdjacentElement('afterend', badge);
+}
+
+function injectHistoryPanel() {
+    const calcSection = document.getElementById('calculator');
+    const panel = document.createElement('div');
+    panel.id = 'history-panel';
+    panel.style.cssText = 'margin-top:2.5rem;';
+    panel.innerHTML = `
+        <h3 style="color:#1a4d7a;border-bottom:2px solid #e8a000;padding-bottom:0.5rem;margin-bottom:1rem;">
+            Build History
+        </h3>
+        <div id="history-content">
+            <p style="color:#888;font-style:italic;">Sign in to view your build history.</p>
+        </div>
+    `;
+    calcSection.appendChild(panel);
+}
+
+async function loadHistory() {
+    if (!authToken || !operatorInfo?.machine_id) return;
+    try {
+        const res = await fetch(
+            `${API_BASE}/api/runs?machine_id=${operatorInfo.machine_id}&limit=50`,
+            { headers: { Authorization: `Bearer ${authToken}` } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        buildHistory = data.runs || [];
+    } catch (e) {
+        console.warn('Could not load history:', e.message);
+    }
+}
+
+function renderHistoryPanel() {
+    const content = document.getElementById('history-content');
+    if (!content) return;
+
+    if (!authToken) {
+        content.innerHTML = `<p style="color:#888;font-style:italic;">Sign in to view your build history.</p>`;
+        return;
+    }
+    if (buildHistory.length === 0) {
+        content.innerHTML = `<p style="color:#888;font-style:italic;">No builds recorded yet. Use "Calculate & Save to History" to start tracking.</p>`;
         return;
     }
 
-    loginStatus.textContent = 'Loading build history…';
-    const data = await model.loadHistoricalState(API_BASE, authToken, mid);
+    const rows = buildHistory.map(run => {
+        const date   = new Date(run.created_at);
+        const dateStr = date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+        const timeStr = date.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+        const rho    = run.packing_density ? (parseFloat(run.packing_density) * 100).toFixed(1) + '%' : '—';
+        const alpha  = run.alpha_optimal   ? (parseFloat(run.alpha_optimal)   * 100).toFixed(1) + '%' : '—';
+        const q      = run.quality_result  ? parseFloat(run.quality_result).toFixed(3) : '—';
+        const s4     = run.degraded_frac   ? (parseFloat(run.degraded_frac)  * 100).toFixed(1) + '%' : '—';
+        const s4High = run.degraded_frac && parseFloat(run.degraded_frac) > 0.12;
 
-    if (data && data.source === 'empirical_history') {
-        const pct = data.pi0.map((v, i) => `${['S₀','S₁','S₂','S₃','S₄'][i]}:${(v*100).toFixed(1)}%`).join(' · ');
-        loginStatus.innerHTML = `
-            <span style="color:#27ae60;">✓ Initial state π(0) loaded from <strong>${data.runs_used} recorded builds</strong>.</span>
-            <span style="color:#555;margin-left:0.75rem;font-size:0.85rem;">${pct}</span>
+        return `
+            <tr style="border-bottom:1px solid #f0f0f0;">
+                <td style="padding:0.6rem 0.75rem;font-size:0.85rem;color:#555;white-space:nowrap;">
+                    ${dateStr}<br><span style="color:#aaa;font-size:0.78rem;">${timeStr}</span>
+                </td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;">${rho}</td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a6b3a;">${alpha}</td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;">${q}</td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;color:${s4High ? '#e74c3c' : '#555'};">${s4}</td>
+                <td style="padding:0.6rem 0.75rem;text-align:center;">
+                    <button onclick="deleteRun(${run.id})"
+                        style="background:#fee;border:1px solid #f5c6cb;color:#e74c3c;
+                               padding:0.25rem 0.6rem;border-radius:4px;cursor:pointer;font-size:0.8rem;"
+                        onmouseover="this.style.background='#f5c6cb'"
+                        onmouseout="this.style.background='#fee'">
+                        Delete
+                    </button>
+                </td>
+            </tr>
         `;
-    } else {
-        loginStatus.innerHTML = `<span style="color:#555;">No build history yet — using virgin initial state assumption for first run.</span>`;
+    }).join('');
+
+    content.innerHTML = `
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+                <thead>
+                    <tr style="background:#f0f4f8;border-bottom:2px solid #dee2e6;">
+                        <th style="padding:0.6rem 0.75rem;text-align:left;font-weight:600;color:#1a4d7a;">Date / Time</th>
+                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">ρ_pack</th>
+                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">α_opt</th>
+                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">Quality</th>
+                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">S₄ Frac.</th>
+                        <th style="padding:0.6rem 0.75rem;text-align:center;font-weight:600;color:#1a4d7a;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <p style="margin-top:0.6rem;font-size:0.8rem;color:#aaa;">
+            ${buildHistory.length} build${buildHistory.length !== 1 ? 's' : ''} recorded — newest first
+        </p>
+    `;
+}
+
+async function deleteRun(id) {
+    if (!confirm('Delete this build record? This cannot be undone.')) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/runs/${id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (!res.ok) throw new Error('Delete failed');
+        buildHistory = buildHistory.filter(r => r.id !== id);
+        renderHistoryPanel();
+        await loadInitialState();
+    } catch (e) {
+        alert('Could not delete: ' + e.message);
     }
 }
 
@@ -204,16 +405,16 @@ machineSelect.addEventListener('change', () => {
     }
 });
 
-// ── Calculate ─────────────────────────────────────────────────────────────────
+// ── Calculate (& save) ────────────────────────────────────────────────────────
 calculateBtn.addEventListener('click', runOptimization);
 
 async function runOptimization() {
-    const packingDensity    = parseFloat(packingDensityInput.value)    / 100;
-    const chamberVolume     = parseFloat(chamberVolumeInput.value);
-    const qualityThreshold  = parseFloat(qualityThresholdInput.value)  / 100;
-    const degradedLimit     = parseFloat(degradedLimitInput.value)     / 100;
-    const powderCost        = parseFloat(powderCostInput.value);
-    const buildsPerYear     = parseInt(buildsPerYearInput.value);
+    const packingDensity   = parseFloat(packingDensityInput.value)   / 100;
+    const chamberVolume    = parseFloat(chamberVolumeInput.value);
+    const qualityThreshold = parseFloat(qualityThresholdInput.value) / 100;
+    const degradedLimit    = parseFloat(degradedLimitInput.value)    / 100;
+    const powderCost       = parseFloat(powderCostInput.value);
+    const buildsPerYear    = parseInt(buildsPerYearInput.value);
 
     const errors = model.validateParameters(packingDensity, qualityThreshold, degradedLimit);
     if (errors.length > 0) { displayErrors(errors); return; }
@@ -228,22 +429,40 @@ async function runOptimization() {
             lastResults = { results, economics, packingDensity, chamberVolume, qualityThreshold, degradedLimit, powderCost, buildsPerYear };
             displayResults(results, economics, lastResults);
 
-            // Auto-save run to server if logged in
             if (authToken) {
                 await saveRun(packingDensity, results.alphaOptimal, chamberVolume, results.quality, results.degradedFraction);
+                showSaveBadge();
             }
         } catch (err) {
             displayError('Calculation error: ' + err.message);
         } finally {
-            calculateBtn.disabled    = false;
-            calculateBtn.textContent = 'Calculate Optimal Ratio';
+            calculateBtn.disabled = false;
+            updateCalculateBtn();
         }
     }, 80);
 }
 
+function showSaveBadge() {
+    let badge = document.getElementById('save-confirm-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.id = 'save-confirm-badge';
+        badge.style.cssText = `
+            display:inline-block;margin-left:1rem;padding:0.3rem 0.75rem;
+            background:#e8f5e9;color:#27ae60;border-radius:4px;
+            font-size:0.85rem;font-weight:600;vertical-align:middle;
+            transition:opacity 0.5s;
+        `;
+        calculateBtn.insertAdjacentElement('afterend', badge);
+    }
+    badge.textContent  = '✓ Saved to history';
+    badge.style.opacity = '1';
+    setTimeout(() => { badge.style.opacity = '0'; }, 3000);
+}
+
 async function saveRun(packingDensity, alphaOptimal, chamberVol, qualityResult, degradedFrac) {
     try {
-        await fetch(`${API_BASE}/api/runs`, {
+        const res = await fetch(`${API_BASE}/api/runs`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -258,18 +477,19 @@ async function saveRun(packingDensity, alphaOptimal, chamberVol, qualityResult, 
                 machine_id:      operatorInfo?.machine_id,
             }),
         });
-        // Refresh pi0 badge after saving
-        setTimeout(() => loadHistoryBadge(), 500);
+        if (!res.ok) return;
+        await loadHistory();
+        renderHistoryPanel();
+        await loadInitialState();
     } catch (e) {
-        console.warn('Could not save run to server:', e.message);
+        console.warn('Could not save run:', e.message);
     }
 }
 
-// ── Display ───────────────────────────────────────────────────────────────────
+// ── Display results ───────────────────────────────────────────────────────────
 function displayResults(results, economics, inputs) {
     const { alphaOptimal, piStock, quality, degradedFraction, pi0Source, pi0RunsUsed } = results;
 
-    // Data-driven badge
     const sourceBadge = pi0Source === 'empirical_history'
         ? `<span style="display:inline-block;background:#e8f5e9;color:#27ae60;border-radius:4px;padding:2px 8px;font-size:0.8rem;font-weight:600;margin-left:0.5rem;">Data-driven (${pi0RunsUsed} builds)</span>`
         : `<span style="display:inline-block;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 8px;font-size:0.8rem;">Virgin assumption</span>`;
@@ -280,7 +500,6 @@ function displayResults(results, economics, inputs) {
             <div class="result-value">${(alphaOptimal * 100).toFixed(1)}%</div>
             <div class="result-label">Virgin : ${((1 - alphaOptimal) * 100).toFixed(1)}% Aged</div>
         </div>
-
         <div class="result-item">
             <h4>Quality Index</h4>
             <div class="result-value">${quality.toFixed(3)}</div>
@@ -291,7 +510,6 @@ function displayResults(results, economics, inputs) {
                 </span>
             </div>
         </div>
-
         <div class="result-item">
             <h4>Degraded Powder Fraction (S₄)</h4>
             <div class="result-value">${(degradedFraction * 100).toFixed(1)}%</div>
@@ -302,7 +520,6 @@ function displayResults(results, economics, inputs) {
                 </span>
             </div>
         </div>
-
         <div class="state-distribution">
             <h4>Steady-State Powder Distribution</h4>
     `;
@@ -325,7 +542,9 @@ function displayResults(results, economics, inputs) {
         <div class="result-item" style="margin-top:1.5rem;">
             <h4>Economic Analysis</h4>
             <table class="comparison-table">
-                <thead><tr><th>Strategy</th><th>Virgin Ratio</th><th>Annual Cost</th><th>Savings</th></tr></thead>
+                <thead>
+                    <tr><th>Strategy</th><th>Virgin Ratio</th><th>Annual Cost</th><th>Savings</th></tr>
+                </thead>
                 <tbody>
                     <tr style="background:#f0fff4;">
                         <td><strong>Optimized (This Model)</strong></td>
@@ -337,7 +556,7 @@ function displayResults(results, economics, inputs) {
                         <td>Formlabs Guideline (30:70)</td>
                         <td>30.0%</td>
                         <td>€${economics.formlabs30.annualCost.toFixed(0)}</td>
-                        <td class="savings-highlight">${economics.savingsVsFormlabs.cost >= 0 ? '+' : ''}€${economics.savingsVsFormlabs.cost.toFixed(0)} (${economics.savingsVsFormlabs.percentage.toFixed(1)}%)</td>
+                        <td class="savings-highlight">+€${economics.savingsVsFormlabs.cost.toFixed(0)} (${economics.savingsVsFormlabs.percentage.toFixed(1)}%)</td>
                     </tr>
                     <tr>
                         <td>Industrial Practice (50:50)</td>
@@ -359,9 +578,8 @@ function displayResults(results, economics, inputs) {
             <div class="result-item" style="background:#f0f7ff;border-left-color:#1a4d7a;">
                 <h4>⚠ Sustainability Constraint Active</h4>
                 <p style="margin:0;font-size:0.95rem;">
-                    The optimal ratio equals the packing density (α<sub>opt</sub> = ρ<sub>pack</sub>),
-                    confirming <strong>Theorem 1</strong>. This is the minimum sustainable virgin ratio
-                    for continuous operation. Quality requirements are satisfied at this minimum threshold.
+                    α<sub>opt</sub> = ρ<sub>pack</sub> — confirming <strong>Theorem 1</strong>.
+                    This is the minimum sustainable virgin ratio for continuous operation.
                 </p>
             </div>
         `;
@@ -371,14 +589,31 @@ function displayResults(results, economics, inputs) {
 }
 
 function displayErrors(errors) {
-    resultsContent.innerHTML = `<div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;"><h4 style="margin-top:0;">Input Validation Errors:</h4><ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul></div>`;
+    resultsContent.innerHTML = `
+        <div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
+            <h4 style="margin-top:0;">Input Validation Errors:</h4>
+            <ul>${errors.map(e => `<li>${e}</li>`).join('')}</ul>
+        </div>`;
 }
 
 function displayError(msg) {
-    resultsContent.innerHTML = `<div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;"><strong>Error:</strong> ${msg}</div>`;
+    resultsContent.innerHTML = `
+        <div style="color:#e74c3c;padding:1rem;background:#fee;border-radius:4px;">
+            <strong>Error:</strong> ${msg}
+        </div>`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-window.addEventListener('load', () => {
-    injectAuthPanel();
+window.addEventListener('load', async () => {
+    injectHeaderLogin();
+    injectPi0Badge();
+    injectHistoryPanel();
+    updateCalculateBtn();
+
+    if (authToken && operatorInfo) {
+        updateNavLoginBtn();
+        await loadInitialState();
+        await loadHistory();
+        renderHistoryPanel();
+    }
 });

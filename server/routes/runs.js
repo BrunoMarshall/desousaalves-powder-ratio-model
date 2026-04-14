@@ -1,6 +1,6 @@
 /**
- * POST /api/runs          — record a build run (with pool_id)
- * GET  /api/runs?pool_id= — list runs for a pool
+ * POST /api/runs
+ * GET  /api/runs?pool_id=
  * GET  /api/runs/:id
  * DELETE /api/runs/:id
  */
@@ -9,12 +9,11 @@ const { authenticate } = require('../middleware/auth');
 
 router.use(authenticate);
 
-// ─── Record a run ─────────────────────────────────────────────────────────────
 router.post('/', async (req, res) => {
   const {
     packing_density, alpha_used, alpha_optimal,
     chamber_vol, quality_result, degraded_frac,
-    machine_id, pool_id, notes,
+    machine_id, pool_id, material_id, notes,
   } = req.body;
 
   if (packing_density == null)
@@ -28,13 +27,13 @@ router.post('/', async (req, res) => {
   try {
     const result = await db.query(
       `INSERT INTO runs
-         (operator_id, machine_id, pool_id, packing_density, alpha_used,
-          alpha_optimal, chamber_vol, quality_result, degraded_frac, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         (operator_id, machine_id, pool_id, material_id, packing_density,
+          alpha_used, alpha_optimal, chamber_vol, quality_result, degraded_frac, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
-      [req.operator.id, mid, pool_id ?? null, packing_density,
-       alpha_used ?? null, alpha_optimal ?? null, chamber_vol ?? null,
-       quality_result ?? null, degraded_frac ?? null, notes ?? null]
+      [req.operator.id, mid, pool_id ?? null, material_id ?? null,
+       packing_density, alpha_used ?? null, alpha_optimal ?? null,
+       chamber_vol ?? null, quality_result ?? null, degraded_frac ?? null, notes ?? null]
     );
     res.status(201).json({ run: result.rows[0] });
   } catch (err) {
@@ -43,7 +42,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ─── List runs for a pool ─────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   const db     = req.app.locals.db;
   const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
@@ -52,14 +50,12 @@ router.get('/', async (req, res) => {
   let machineIds = [];
 
   if (req.query.pool_id) {
-    // Fetch machine IDs from pool (verify ownership)
     const poolCheck = await db.query(
       'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
       [parseInt(req.query.pool_id), req.operator.id]
     );
     if (!poolCheck.rows.length)
       return res.status(404).json({ error: 'Pool not found' });
-
     const pmResult = await db.query(
       'SELECT machine_id FROM pool_machines WHERE pool_id=$1',
       [parseInt(req.query.pool_id)]
@@ -77,15 +73,14 @@ router.get('/', async (req, res) => {
     return res.status(400).json({ error: 'No machines found' });
 
   try {
-    const placeholders = machineIds.map((_, i) => `$${i + 1}`).join(',');
+    const ph = machineIds.map((_, i) => `$${i + 1}`).join(',');
     const result = await db.query(
-      `SELECT r.*, o.username AS operator_name,
-              CONCAT(o.last_name, ', ', o.first_name) AS operator_display,
-              m.name AS machine_name
+      `SELECT r.*, m.name AS machine_name, mat.name AS material_name,
+              mat.is_calibrated AS material_is_calibrated
        FROM runs r
-       LEFT JOIN operators o ON o.id = r.operator_id
-       LEFT JOIN machines  m ON m.id = r.machine_id
-       WHERE r.machine_id IN (${placeholders})
+       LEFT JOIN machines  m   ON m.id   = r.machine_id
+       LEFT JOIN materials mat ON mat.id = r.material_id
+       WHERE r.machine_id IN (${ph})
        ORDER BY r.created_at DESC
        LIMIT $${machineIds.length + 1} OFFSET $${machineIds.length + 2}`,
       [...machineIds, limit, offset]
@@ -97,15 +92,15 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ─── Single run ───────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   const db = req.app.locals.db;
   try {
     const result = await db.query(
-      `SELECT r.*, m.name AS machine_name
+      `SELECT r.*, m.name AS machine_name, mat.name AS material_name
        FROM runs r
-       LEFT JOIN machines m ON m.id = r.machine_id
-       WHERE r.id = $1`, [req.params.id]
+       LEFT JOIN machines  m   ON m.id   = r.machine_id
+       LEFT JOIN materials mat ON mat.id = r.material_id
+       WHERE r.id=$1`, [req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json({ run: result.rows[0] });
@@ -114,7 +109,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ─── Delete a run ─────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   const db = req.app.locals.db;
   try {
@@ -128,7 +122,6 @@ router.delete('/:id', async (req, res) => {
       'SELECT machine_id FROM operator_machines WHERE operator_id=$1', [req.operator.id]
     );
     const ownedIds = owned.rows.map(r => r.machine_id);
-
     if (!ownedIds.includes(check.rows[0].machine_id) && req.operator.role !== 'admin')
       return res.status(403).json({ error: 'Not authorized to delete this run' });
 

@@ -11,9 +11,10 @@ const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const authRoutes   = require('./routes/auth');
-const runsRoutes   = require('./routes/runs');
-const historyRoutes = require('./routes/history');
+const authRoutes      = require('./routes/auth');
+const runsRoutes      = require('./routes/runs');
+const historyRoutes   = require('./routes/history');
+const materialsRoutes = require('./routes/materials');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,9 +60,10 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
-app.use('/api/auth',    authRoutes);
-app.use('/api/runs',    runsRoutes);
-app.use('/api/history', historyRoutes);
+app.use('/api/auth',      authRoutes);
+app.use('/api/runs',      runsRoutes);
+app.use('/api/history',   historyRoutes);
+app.use('/api/materials', materialsRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

@@ -1,12 +1,13 @@
 /**
- * POST /api/auth/register              — create operator with first pool
- * POST /api/auth/login                 — get JWT
- * GET  /api/auth/me                    — profile + all pools
- * GET  /api/auth/pools                 — list operator's powder pools
- * POST /api/auth/pools                 — create a new powder pool
- * DELETE /api/auth/pools/:poolId       — delete a pool (must have no runs)
- * POST /api/auth/pools/:poolId/machines       — add machine to pool
- * DELETE /api/auth/pools/:poolId/machines/:mid — remove machine from pool
+ * POST /api/auth/register
+ * POST /api/auth/login
+ * GET  /api/auth/me
+ * GET  /api/auth/pools
+ * POST /api/auth/pools
+ * DELETE /api/auth/pools/:poolId
+ * POST   /api/auth/pools/:poolId/machines
+ * DELETE /api/auth/pools/:poolId/machines/:mid
+ * PATCH  /api/auth/pools/:poolId  — update pool name or material
  */
 const router  = require('express').Router();
 const bcrypt  = require('bcrypt');
@@ -17,30 +18,39 @@ const SALT_ROUNDS = 12;
 
 // ─── Helper: fetch all pools for an operator ──────────────────────────────────
 async function fetchPools(db, operatorId) {
-  const pools = await db.query(
-    `SELECT pp.id, pp.name, pp.created_at,
-            array_agg(pm.machine_id ORDER BY pm.machine_id) AS machine_ids,
-            array_agg(m.name        ORDER BY pm.machine_id) AS machine_names,
-            array_agg(m.model_key   ORDER BY pm.machine_id) AS machine_keys
+  const result = await db.query(
+    `SELECT pp.id, pp.name, pp.created_at, pp.material_id,
+            mat.name             AS material_name,
+            mat.manufacturer     AS material_manufacturer,
+            mat.material_type    AS material_type,
+            mat.is_calibrated    AS material_is_calibrated,
+            mat.calibration_note AS material_calibration_note,
+            array_agg(pm.machine_id ORDER BY pm.machine_id) FILTER (WHERE pm.machine_id IS NOT NULL) AS machine_ids,
+            array_agg(m.name        ORDER BY pm.machine_id) FILTER (WHERE m.name IS NOT NULL)        AS machine_names,
+            array_agg(m.model_key   ORDER BY pm.machine_id) FILTER (WHERE m.model_key IS NOT NULL)   AS machine_keys
      FROM powder_pools pp
      LEFT JOIN pool_machines pm ON pm.pool_id  = pp.id
      LEFT JOIN machines m       ON m.id        = pm.machine_id
+     LEFT JOIN materials mat    ON mat.id       = pp.material_id
      WHERE pp.operator_id = $1
-     GROUP BY pp.id, pp.name, pp.created_at
+     GROUP BY pp.id, pp.name, pp.created_at, pp.material_id,
+              mat.name, mat.manufacturer, mat.material_type,
+              mat.is_calibrated, mat.calibration_note
      ORDER BY pp.created_at`,
     [operatorId]
   );
-  return pools.rows.map(p => ({
+  return result.rows.map(p => ({
     ...p,
-    machine_ids:   p.machine_ids.filter(Boolean),
-    machine_names: p.machine_names.filter(Boolean),
-    machine_keys:  p.machine_keys.filter(Boolean),
+    machine_ids:   p.machine_ids   || [],
+    machine_names: p.machine_names || [],
+    machine_keys:  p.machine_keys  || [],
   }));
 }
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
-  const { username, password, first_name, last_name, pool_name, machine_ids } = req.body;
+  const { username, password, first_name, last_name,
+          pool_name, machine_ids, material_id } = req.body;
 
   if (!username || !password)
     return res.status(400).json({ error: 'username and password are required' });
@@ -57,7 +67,7 @@ router.post('/register', async (req, res) => {
     await client.query('BEGIN');
 
     const exists = await client.query(
-      'SELECT id FROM operators WHERE username = $1', [username]
+      'SELECT id FROM operators WHERE username=$1', [username]
     );
     if (exists.rows.length > 0) {
       await client.query('ROLLBACK');
@@ -65,7 +75,6 @@ router.post('/register', async (req, res) => {
     }
 
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-
     const opResult = await client.query(
       `INSERT INTO operators (username, password_hash, first_name, last_name, machine_id)
        VALUES ($1,$2,$3,$4,$5)
@@ -74,15 +83,13 @@ router.post('/register', async (req, res) => {
     );
     const operator = opResult.rows[0];
 
-    // Create first powder pool
-    const poolName = (pool_name || 'Pool 1').trim();
     const poolResult = await client.query(
-      `INSERT INTO powder_pools (operator_id, name) VALUES ($1,$2) RETURNING id`,
-      [operator.id, poolName]
+      `INSERT INTO powder_pools (operator_id, name, material_id)
+       VALUES ($1,$2,$3) RETURNING id`,
+      [operator.id, (pool_name || 'Pool 1').trim(), material_id || null]
     );
     const poolId = poolResult.rows[0].id;
 
-    // Link machines to pool + operator_machines
     for (const mid of machine_ids) {
       await client.query(
         `INSERT INTO pool_machines (pool_id, machine_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
@@ -96,7 +103,6 @@ router.post('/register', async (req, res) => {
     }
 
     await client.query('COMMIT');
-
     const pools = await fetchPools(db, operator.id);
     res.status(201).json({ operator: { ...operator, pools } });
   } catch (err) {
@@ -116,9 +122,7 @@ router.post('/login', async (req, res) => {
 
   const db = req.app.locals.db;
   try {
-    const result = await db.query(
-      'SELECT * FROM operators WHERE username = $1', [username]
-    );
+    const result = await db.query('SELECT * FROM operators WHERE username=$1', [username]);
     const operator = result.rows[0];
     if (!operator)
       return res.status(401).json({ error: 'Invalid username or password' });
@@ -128,18 +132,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
 
     await db.query('UPDATE operators SET last_login=NOW() WHERE id=$1', [operator.id]);
-
     const pools = await fetchPools(db, operator.id);
 
     const token = jwt.sign(
-      {
-        id:         operator.id,
-        username:   operator.username,
-        first_name: operator.first_name,
-        last_name:  operator.last_name,
-        machine_id: operator.machine_id,
-        role:       operator.role,
-      },
+      { id: operator.id, username: operator.username,
+        first_name: operator.first_name, last_name: operator.last_name,
+        machine_id: operator.machine_id, role: operator.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -147,13 +145,9 @@ router.post('/login', async (req, res) => {
     res.json({
       token,
       operator: {
-        id:         operator.id,
-        username:   operator.username,
-        first_name: operator.first_name,
-        last_name:  operator.last_name,
-        machine_id: operator.machine_id,
-        role:       operator.role,
-        pools,
+        id: operator.id, username: operator.username,
+        first_name: operator.first_name, last_name: operator.last_name,
+        machine_id: operator.machine_id, role: operator.role, pools,
       }
     });
   } catch (err) {
@@ -168,7 +162,7 @@ router.get('/me', authenticate, async (req, res) => {
   try {
     const result = await db.query(
       `SELECT id, username, first_name, last_name, machine_id, role, created_at
-       FROM operators WHERE id = $1`, [req.operator.id]
+       FROM operators WHERE id=$1`, [req.operator.id]
     );
     const pools = await fetchPools(db, req.operator.id);
     res.json({ operator: { ...result.rows[0], pools } });
@@ -181,8 +175,7 @@ router.get('/me', authenticate, async (req, res) => {
 router.get('/pools', authenticate, async (req, res) => {
   const db = req.app.locals.db;
   try {
-    const pools = await fetchPools(db, req.operator.id);
-    res.json({ pools });
+    res.json({ pools: await fetchPools(db, req.operator.id) });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -190,7 +183,7 @@ router.get('/pools', authenticate, async (req, res) => {
 
 // ─── Create pool ──────────────────────────────────────────────────────────────
 router.post('/pools', authenticate, async (req, res) => {
-  const { name, machine_ids } = req.body;
+  const { name, machine_ids, material_id } = req.body;
   if (!name || !name.trim())
     return res.status(400).json({ error: 'Pool name is required' });
   if (!machine_ids || !machine_ids.length)
@@ -200,29 +193,25 @@ router.post('/pools', authenticate, async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-
     const poolResult = await client.query(
-      `INSERT INTO powder_pools (operator_id, name) VALUES ($1,$2) RETURNING id, name, created_at`,
-      [req.operator.id, name.trim()]
+      `INSERT INTO powder_pools (operator_id, name, material_id)
+       VALUES ($1,$2,$3) RETURNING id`,
+      [req.operator.id, name.trim(), material_id || null]
     );
     const poolId = poolResult.rows[0].id;
-
     for (const mid of machine_ids) {
       await client.query(
         `INSERT INTO pool_machines (pool_id, machine_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
         [poolId, mid]
       );
-      // Also ensure machine is in operator_machines
       await client.query(
         `INSERT INTO operator_machines (operator_id, machine_id, is_primary)
          VALUES ($1,$2,false) ON CONFLICT DO NOTHING`,
         [req.operator.id, mid]
       );
     }
-
     await client.query('COMMIT');
-    const pools = await fetchPools(db, req.operator.id);
-    res.status(201).json({ pools });
+    res.status(201).json({ pools: await fetchPools(db, req.operator.id) });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('create pool error:', err);
@@ -232,29 +221,53 @@ router.post('/pools', authenticate, async (req, res) => {
   }
 });
 
-// ─── Delete pool ──────────────────────────────────────────────────────────────
-router.delete('/pools/:poolId', authenticate, async (req, res) => {
-  const db = req.app.locals.db;
+// ─── Update pool (name or material) ──────────────────────────────────────────
+router.patch('/pools/:poolId', authenticate, async (req, res) => {
+  const db  = req.app.locals.db;
   const pid = parseInt(req.params.poolId);
+  const { name, material_id } = req.body;
+
   try {
-    // Check ownership
     const check = await db.query(
-      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
-      [pid, req.operator.id]
+      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2', [pid, req.operator.id]
     );
     if (!check.rows.length)
       return res.status(404).json({ error: 'Pool not found' });
 
-    // Prevent deleting last pool
+    if (name !== undefined) {
+      await db.query('UPDATE powder_pools SET name=$1 WHERE id=$2', [name.trim(), pid]);
+    }
+    if (material_id !== undefined) {
+      await db.query('UPDATE powder_pools SET material_id=$1 WHERE id=$2',
+        [material_id || null, pid]);
+    }
+
+    res.json({ pools: await fetchPools(db, req.operator.id) });
+  } catch (err) {
+    console.error('patch pool error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Delete pool ──────────────────────────────────────────────────────────────
+router.delete('/pools/:poolId', authenticate, async (req, res) => {
+  const db  = req.app.locals.db;
+  const pid = parseInt(req.params.poolId);
+  try {
+    const check = await db.query(
+      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2', [pid, req.operator.id]
+    );
+    if (!check.rows.length)
+      return res.status(404).json({ error: 'Pool not found' });
+
     const count = await db.query(
       'SELECT COUNT(*) FROM powder_pools WHERE operator_id=$1', [req.operator.id]
     );
     if (parseInt(count.rows[0].count) <= 1)
-      return res.status(400).json({ error: 'Cannot delete your only pool. Create another first.' });
+      return res.status(400).json({ error: 'Cannot delete your only pool.' });
 
     await db.query('DELETE FROM powder_pools WHERE id=$1', [pid]);
-    const pools = await fetchPools(db, req.operator.id);
-    res.json({ pools });
+    res.json({ pools: await fetchPools(db, req.operator.id) });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -265,16 +278,13 @@ router.post('/pools/:poolId/machines', authenticate, async (req, res) => {
   const db  = req.app.locals.db;
   const pid = parseInt(req.params.poolId);
   const { machine_id } = req.body;
-  if (!machine_id)
-    return res.status(400).json({ error: 'machine_id required' });
+  if (!machine_id) return res.status(400).json({ error: 'machine_id required' });
 
   try {
     const check = await db.query(
-      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
-      [pid, req.operator.id]
+      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2', [pid, req.operator.id]
     );
-    if (!check.rows.length)
-      return res.status(404).json({ error: 'Pool not found' });
+    if (!check.rows.length) return res.status(404).json({ error: 'Pool not found' });
 
     await db.query(
       `INSERT INTO pool_machines (pool_id, machine_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
@@ -285,9 +295,7 @@ router.post('/pools/:poolId/machines', authenticate, async (req, res) => {
        VALUES ($1,$2,false) ON CONFLICT DO NOTHING`,
       [req.operator.id, machine_id]
     );
-
-    const pools = await fetchPools(db, req.operator.id);
-    res.json({ pools });
+    res.json({ pools: await fetchPools(db, req.operator.id) });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -301,25 +309,18 @@ router.delete('/pools/:poolId/machines/:machineId', authenticate, async (req, re
 
   try {
     const check = await db.query(
-      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
-      [pid, req.operator.id]
+      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2', [pid, req.operator.id]
     );
-    if (!check.rows.length)
-      return res.status(404).json({ error: 'Pool not found' });
+    if (!check.rows.length) return res.status(404).json({ error: 'Pool not found' });
 
-    // Prevent removing last machine from pool
     const count = await db.query(
       'SELECT COUNT(*) FROM pool_machines WHERE pool_id=$1', [pid]
     );
     if (parseInt(count.rows[0].count) <= 1)
-      return res.status(400).json({ error: 'Cannot remove the last machine from a pool. Delete the pool instead.' });
+      return res.status(400).json({ error: 'Cannot remove the last machine from a pool.' });
 
-    await db.query(
-      'DELETE FROM pool_machines WHERE pool_id=$1 AND machine_id=$2', [pid, mid]
-    );
-
-    const pools = await fetchPools(db, req.operator.id);
-    res.json({ pools });
+    await db.query('DELETE FROM pool_machines WHERE pool_id=$1 AND machine_id=$2', [pid, mid]);
+    res.json({ pools: await fetchPools(db, req.operator.id) });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }

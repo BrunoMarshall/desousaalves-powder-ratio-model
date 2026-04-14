@@ -1,5 +1,5 @@
 /**
- * GET /api/history/initial-state?pool_id=1  — π(0) from a specific pool's runs
+ * GET /api/history/initial-state?pool_id=1
  * GET /api/history/stats?pool_id=1
  * GET /api/history/trend?pool_id=1
  */
@@ -8,68 +8,53 @@ const { authenticate } = require('../middleware/auth');
 
 router.use(authenticate);
 
-// ─── Verify pool belongs to operator, return its machine IDs ──────────────────
 async function getPoolMachineIds(db, poolId, operatorId) {
   const check = await db.query(
-    'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
-    [poolId, operatorId]
+    'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2', [poolId, operatorId]
   );
-  if (!check.rows.length) return null; // not found / not owned
-
+  if (!check.rows.length) return null;
   const result = await db.query(
     'SELECT machine_id FROM pool_machines WHERE pool_id=$1', [poolId]
   );
   return result.rows.map(r => r.machine_id);
 }
 
-// ─── π(0) from pool history ───────────────────────────────────────────────────
 router.get('/initial-state', async (req, res) => {
   const db    = req.app.locals.db;
   const nRuns = Math.min(parseInt(req.query.n) || 30, 100);
 
   if (!req.query.pool_id)
     return res.status(400).json({ error: 'pool_id is required' });
-
   const poolId = parseInt(req.query.pool_id);
 
   try {
     const machineIds = await getPoolMachineIds(db, poolId, req.operator.id);
-    if (!machineIds)
-      return res.status(404).json({ error: 'Pool not found' });
+    if (!machineIds) return res.status(404).json({ error: 'Pool not found' });
 
     if (!machineIds.length) {
       return res.json({
-        pi0: [1.0, 0.0, 0.0, 0.0, 0.0],
-        source: 'assumed_virgin',
-        runs_used: 0,
-        pool_id: poolId,
-        message: 'Pool has no machines yet.',
+        pi0: [1.0, 0.0, 0.0, 0.0, 0.0], source: 'assumed_virgin',
+        runs_used: 0, pool_id: poolId, message: 'Pool has no machines yet.',
       });
     }
 
-    const placeholders = machineIds.map((_, i) => `$${i + 1}`).join(',');
+    const ph = machineIds.map((_, i) => `$${i + 1}`).join(',');
     const result = await db.query(
       `SELECT packing_density, alpha_used, alpha_optimal, machine_id, created_at
-       FROM runs
-       WHERE machine_id IN (${placeholders})
-       ORDER BY created_at ASC
-       LIMIT $${machineIds.length + 1}`,
+       FROM runs WHERE machine_id IN (${ph})
+       ORDER BY created_at ASC LIMIT $${machineIds.length + 1}`,
       [...machineIds, nRuns]
     );
-
     const runs = result.rows;
 
     if (runs.length === 0) {
       return res.json({
-        pi0: [1.0, 0.0, 0.0, 0.0, 0.0],
-        source: 'assumed_virgin',
-        runs_used: 0,
-        pool_id: poolId,
+        pi0: [1.0, 0.0, 0.0, 0.0, 0.0], source: 'assumed_virgin',
+        runs_used: 0, pool_id: poolId,
         message: 'No build history for this pool yet. Using virgin initial state assumption.',
       });
     }
 
-    // Transition matrix P
     const P = [
       [0.62, 0.33, 0.04, 0.01, 0.00],
       [0.00, 0.67, 0.26, 0.06, 0.01],
@@ -96,9 +81,8 @@ router.get('/initial-state', async (req, res) => {
     const w       = [1.0, 0.9, 0.7, 0.4, 0.0];
     const quality = piStock.reduce((acc, pi, i) => acc + w[i] * pi, 0);
     const avgRho  = runs.reduce((s, r) => s + parseFloat(r.packing_density), 0) / runs.length;
-
-    const machineNames = await db.query(
-      `SELECT id, name FROM machines WHERE id = ANY($1::int[])`, [machineIds]
+    const mNames  = await db.query(
+      `SELECT id, name FROM machines WHERE id=ANY($1::int[])`, [machineIds]
     );
 
     res.json({
@@ -108,7 +92,7 @@ router.get('/initial-state', async (req, res) => {
       runs_used:           runs.length,
       pool_id:             poolId,
       machine_ids:         machineIds,
-      machine_names:       machineNames.rows.map(m => m.name),
+      machine_names:       mNames.rows.map(m => m.name),
       avg_packing_density: Math.round(avgRho * 10000) / 10000,
       oldest_run:          runs[0].created_at,
       newest_run:          runs[runs.length - 1].created_at,
@@ -120,26 +104,21 @@ router.get('/initial-state', async (req, res) => {
   }
 });
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   const db = req.app.locals.db;
-  if (!req.query.pool_id)
-    return res.status(400).json({ error: 'pool_id required' });
+  if (!req.query.pool_id) return res.status(400).json({ error: 'pool_id required' });
   const poolId = parseInt(req.query.pool_id);
-
   try {
     const machineIds = await getPoolMachineIds(db, poolId, req.operator.id);
     if (!machineIds) return res.status(404).json({ error: 'Pool not found' });
-
-    const placeholders = machineIds.map((_, i) => `$${i + 1}`).join(',');
+    const ph = machineIds.map((_, i) => `$${i + 1}`).join(',');
     const result = await db.query(
       `SELECT COUNT(*) AS total_runs,
               ROUND(AVG(packing_density)::numeric,4) AS avg_packing_density,
               ROUND(AVG(quality_result)::numeric,4)  AS avg_quality,
               ROUND(AVG(alpha_optimal)::numeric,4)   AS avg_alpha_optimal,
               MIN(created_at) AS first_run, MAX(created_at) AS last_run
-       FROM runs WHERE machine_id IN (${placeholders})`,
-      machineIds
+       FROM runs WHERE machine_id IN (${ph})`, machineIds
     );
     res.json({ stats: result.rows[0], pool_id: poolId });
   } catch (err) {
@@ -147,23 +126,19 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// ─── Trend ────────────────────────────────────────────────────────────────────
 router.get('/trend', async (req, res) => {
   const db    = req.app.locals.db;
   const limit = Math.min(parseInt(req.query.limit) || 30, 100);
-  if (!req.query.pool_id)
-    return res.status(400).json({ error: 'pool_id required' });
+  if (!req.query.pool_id) return res.status(400).json({ error: 'pool_id required' });
   const poolId = parseInt(req.query.pool_id);
-
   try {
     const machineIds = await getPoolMachineIds(db, poolId, req.operator.id);
     if (!machineIds) return res.status(404).json({ error: 'Pool not found' });
-
-    const placeholders = machineIds.map((_, i) => `$${i + 1}`).join(',');
+    const ph = machineIds.map((_, i) => `$${i + 1}`).join(',');
     const result = await db.query(
       `SELECT id, packing_density, alpha_optimal, quality_result,
               degraded_frac, machine_id, created_at
-       FROM runs WHERE machine_id IN (${placeholders})
+       FROM runs WHERE machine_id IN (${ph})
        ORDER BY created_at DESC LIMIT $${machineIds.length + 1}`,
       [...machineIds, limit]
     );

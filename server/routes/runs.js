@@ -1,8 +1,8 @@
 /**
- * POST /api/runs        — record a new build run
- * GET  /api/runs        — list runs (supports ?machine_ids=1,2 or ?machine_id=1)
- * GET  /api/runs/:id    — single run
- * DELETE /api/runs/:id  — delete a run
+ * POST /api/runs          — record a build run (with pool_id)
+ * GET  /api/runs?pool_id= — list runs for a pool
+ * GET  /api/runs/:id
+ * DELETE /api/runs/:id
  */
 const router = require('express').Router();
 const { authenticate } = require('../middleware/auth');
@@ -14,10 +14,10 @@ router.post('/', async (req, res) => {
   const {
     packing_density, alpha_used, alpha_optimal,
     chamber_vol, quality_result, degraded_frac,
-    machine_id, notes,
+    machine_id, pool_id, notes,
   } = req.body;
 
-  if (packing_density === undefined || packing_density === null)
+  if (packing_density == null)
     return res.status(400).json({ error: 'packing_density is required' });
   if (packing_density <= 0 || packing_density > 0.6)
     return res.status(400).json({ error: 'packing_density must be between 0 and 0.6' });
@@ -28,12 +28,12 @@ router.post('/', async (req, res) => {
   try {
     const result = await db.query(
       `INSERT INTO runs
-         (operator_id, machine_id, packing_density, alpha_used, alpha_optimal,
-          chamber_vol, quality_result, degraded_frac, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (operator_id, machine_id, pool_id, packing_density, alpha_used,
+          alpha_optimal, chamber_vol, quality_result, degraded_frac, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
-      [req.operator.id, mid, packing_density, alpha_used ?? null,
-       alpha_optimal ?? null, chamber_vol ?? null,
+      [req.operator.id, mid, pool_id ?? null, packing_density,
+       alpha_used ?? null, alpha_optimal ?? null, chamber_vol ?? null,
        quality_result ?? null, degraded_frac ?? null, notes ?? null]
     );
     res.status(201).json({ run: result.rows[0] });
@@ -43,24 +43,38 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ─── List runs ────────────────────────────────────────────────────────────────
+// ─── List runs for a pool ─────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   const db     = req.app.locals.db;
-  const limit  = Math.min(parseInt(req.query.limit)  || 100, 500);
+  const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
   const offset = parseInt(req.query.offset) || 0;
 
-  // Support ?machine_ids=1,2,3 or ?machine_id=1
   let machineIds = [];
-  if (req.query.machine_ids) {
+
+  if (req.query.pool_id) {
+    // Fetch machine IDs from pool (verify ownership)
+    const poolCheck = await db.query(
+      'SELECT id FROM powder_pools WHERE id=$1 AND operator_id=$2',
+      [parseInt(req.query.pool_id), req.operator.id]
+    );
+    if (!poolCheck.rows.length)
+      return res.status(404).json({ error: 'Pool not found' });
+
+    const pmResult = await db.query(
+      'SELECT machine_id FROM pool_machines WHERE pool_id=$1',
+      [parseInt(req.query.pool_id)]
+    );
+    machineIds = pmResult.rows.map(r => r.machine_id);
+  } else if (req.query.machine_ids) {
     machineIds = req.query.machine_ids.split(',').map(Number).filter(Boolean);
   } else if (req.query.machine_id) {
     machineIds = [parseInt(req.query.machine_id)];
-  } else if (req.operator.machine_id) {
+  } else {
     machineIds = [req.operator.machine_id];
   }
 
   if (!machineIds.length)
-    return res.status(400).json({ error: 'machine_id or machine_ids required' });
+    return res.status(400).json({ error: 'No machines found' });
 
   try {
     const placeholders = machineIds.map((_, i) => `$${i + 1}`).join(',');
@@ -88,12 +102,10 @@ router.get('/:id', async (req, res) => {
   const db = req.app.locals.db;
   try {
     const result = await db.query(
-      `SELECT r.*, o.username, m.name AS machine_name
+      `SELECT r.*, m.name AS machine_name
        FROM runs r
-       LEFT JOIN operators o ON o.id = r.operator_id
-       LEFT JOIN machines  m ON m.id = r.machine_id
-       WHERE r.id = $1`,
-      [req.params.id]
+       LEFT JOIN machines m ON m.id = r.machine_id
+       WHERE r.id = $1`, [req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json({ run: result.rows[0] });
@@ -107,22 +119,20 @@ router.delete('/:id', async (req, res) => {
   const db = req.app.locals.db;
   try {
     const check = await db.query(
-      'SELECT id, machine_id FROM runs WHERE id = $1', [req.params.id]
+      'SELECT id, machine_id FROM runs WHERE id=$1', [req.params.id]
     );
     if (!check.rows.length)
       return res.status(404).json({ error: 'Run not found' });
 
-    // Allow deletion if the run belongs to one of the operator's machines
-    const ownedMachines = await db.query(
-      'SELECT machine_id FROM operator_machines WHERE operator_id = $1',
-      [req.operator.id]
+    const owned = await db.query(
+      'SELECT machine_id FROM operator_machines WHERE operator_id=$1', [req.operator.id]
     );
-    const ownedIds = ownedMachines.rows.map(r => r.machine_id);
+    const ownedIds = owned.rows.map(r => r.machine_id);
 
     if (!ownedIds.includes(check.rows[0].machine_id) && req.operator.role !== 'admin')
       return res.status(403).json({ error: 'Not authorized to delete this run' });
 
-    await db.query('DELETE FROM runs WHERE id = $1', [req.params.id]);
+    await db.query('DELETE FROM runs WHERE id=$1', [req.params.id]);
     res.json({ deleted: true, id: parseInt(req.params.id) });
   } catch (err) {
     console.error('runs DELETE error:', err);

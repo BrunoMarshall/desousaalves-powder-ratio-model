@@ -805,13 +805,11 @@ async function removeMachineFromPool(poolId, machineId) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function updateCalculateBtn() {
-    if (authToken) {
-        calculateBtn.textContent  = 'Calculate & Save to History';
-        calculateBtn.style.background = '#1a6b3a';
-    } else {
-        calculateBtn.textContent  = 'Calculate Optimal Ratio';
-        calculateBtn.style.background = '';
-    }
+    calculateBtn.textContent = 'Calculate Optimal Ratio';
+    calculateBtn.style.background = authToken ? '#1a6b3a' : '';
+
+    const row = document.getElementById('save-history-row');
+    if (row) row.style.display = authToken ? 'block' : 'none';
 }
 
 machineSelect.addEventListener('change', () => {
@@ -930,13 +928,12 @@ function updatePi0Badge(data, modeOverride) {
 }
 
 function injectPi0Badge() {
-    const h2 = document.querySelector('#calculator h2');
     const badge = document.createElement('div');
     badge.id = 'pi0-badge';
     badge.style.cssText=`padding:0.82rem 1.05rem;border-radius:7px;border:1px solid #dee2e6;
-        margin-bottom:1.2rem;font-size:0.88rem;background:#f8f9fa;transition:background 0.3s,border-color 0.3s;`;
+        margin-bottom:1rem;font-size:0.88rem;background:#f8f9fa;transition:background 0.3s,border-color 0.3s;`;
     badge.innerHTML=`<span style="color:#888;">Sign in to enable data-driven mode.</span>`;
-    h2.insertAdjacentElement('afterend', badge);
+    calculateBtn.insertAdjacentElement('beforebegin', badge);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1079,7 +1076,11 @@ async function runOptimization() {
             const results   = model.optimizeVirginRatio(packingDensity, qualityThreshold, degradedLimit);
             const economics = model.calculateEconomics(chamberVolume, packingDensity, buildsPerYear, powderCost, results.alphaOptimal);
             displayResults(results, economics, {packingDensity,chamberVolume,qualityThreshold,degradedLimit,powderCost,buildsPerYear});
-            if (authToken) { await saveRun(packingDensity, results.alphaOptimal, chamberVolume, results.quality, results.degradedFraction); showSaveBadge(); }
+            const saveToggle = document.getElementById('save-history-toggle');
+            if (authToken && saveToggle && saveToggle.checked) {
+                await saveRun(packingDensity, results.alphaOptimal, chamberVolume, results.quality, results.degradedFraction);
+                showSaveBadge();
+            }
         } catch (err) {
             displayError('Calculation error: '+err.message);
         } finally {

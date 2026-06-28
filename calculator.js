@@ -899,7 +899,7 @@ function updatePi0Badge(data, modeOverride) {
     const toggle = (authToken && pool) ? `
         <div class="pi0-toggle-row">
             <span class="pi0-toggle-label ${isData ? 'active' : ''}" onclick="setPi0Mode('data')">Use my build history</span>
-            <span class="pi0-switch ${isData ? 'on' : 'off'}" onclick="setPi0Mode('${isData ? 'virgin' : 'data'}')" role="switch" aria-checked="${isData}">
+            <span class="pi0-switch ${isData ? 'left' : 'right'}" onclick="setPi0Mode('${isData ? 'virgin' : 'data'}')" role="switch" aria-checked="${isData}">
                 <span class="pi0-switch-knob"></span>
             </span>
             <span class="pi0-toggle-label ${!isData ? 'active' : ''}" onclick="setPi0Mode('virgin')">Assume virgin stock</span>

@@ -200,8 +200,12 @@ p {
     transition: background 0.2s;
 }
 
-.pi0-switch.on {
+.pi0-switch.left {
     background: var(--success-color, #27ae60);
+}
+
+.pi0-switch.right {
+    background: #c9a227;
 }
 
 .pi0-switch-knob {
@@ -216,7 +220,7 @@ p {
     transition: left 0.2s;
 }
 
-.pi0-switch.on .pi0-switch-knob {
+.pi0-switch.right .pi0-switch-knob {
     left: 22px;
 }
 

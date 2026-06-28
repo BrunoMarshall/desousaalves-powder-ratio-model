@@ -2,7 +2,29 @@
  * De Sousa Alves et al. Powder Refresh Ratio Optimization Model
  * Markov Chain-Based Framework for SLS Powder Management
  *
- * v2.0 — Data-driven initial state π(0) from build history
+ * v3.0 — Model A / Model B split (correction per S. Pougkakiotis review)
+ *
+ *   Model A — calculateSteadyState(alpha)
+ *     Long-run planning/design model. Always starts from virgin powder
+ *     (delta_0) and asks: "if I commit to ratio alpha forever, what is
+ *     the long-run equilibrium powder-quality distribution?" The initial
+ *     condition is irrelevant by construction (it washes out over many
+ *     cycles) — that is the model's correct, intended behaviour.
+ *
+ *   Model B — optimizeVirginRatio(...) / oneStepDistribution(alpha, piE)
+ *     Per-build operational/control model. Uses the empirically measured
+ *     current stock distribution piE directly: mixes it with fresh virgin
+ *     powder at ratio alpha, then propagates ONE thermal cycle through P.
+ *     This answers "given what's in the hopper right now, what alpha
+ *     should I use for the NEXT build?" — the question the build-tracking
+ *     app and live calculator actually need answered.
+ *
+ *   Earlier versions (<3.0) incorrectly substituted the empirical stock
+ *   distribution into the Model A steady-state formula. That silently
+ *   computes the stationary distribution of a hypothetical process in
+ *   which aged stock — not virgin powder — is the refresh source, which
+ *   is not the physical question being asked. See the "Data-Driven
+ *   Initial State Estimation" / Theorem 2 correction in the manuscript.
  *
  * Authors: Bruno Alexandre de Sousa Alves, Abdel-Hamid Soliman, Dimitrios Kontziampasis
  * License: MIT
@@ -82,16 +104,20 @@ class MarkovPowderModel {
     // ── Core model ─────────────────────────────────────────────────────────────
 
     /**
-     * Steady-state distribution: π* = α·δ₀·P·[I−(1−α)·P]⁻¹
-     * When pi0 has been loaded from history, the chamber-loading step
-     * uses the empirical initial stock state instead of δ₀=virgin.
+     * MODEL A — Steady-state distribution (long-run planning/design):
+     * π* = α·δ₀·P·[I−(1−α)·P]⁻¹
+     *
+     * Always starts from virgin powder (δ₀). The initial condition is
+     * deliberately irrelevant here — that is the correct behaviour for a
+     * long-run planning question, NOT a defect to "fix" with empirical
+     * stock data. Use this for capacity/design decisions, not per-build
+     * recommendations (use optimizeVirginRatio / Model B for those).
      *
      * @param {number} alpha — virgin powder ratio
-     * @param {Array}  pi0Override — optional explicit initial state [π₀…π₄]
      */
-    calculateSteadyState(alpha, pi0Override = null) {
+    calculateSteadyState(alpha) {
         const n  = this.P.length;
-        const pi0 = pi0Override || this.pi0;
+        const delta0 = [1, 0, 0, 0, 0];
 
         // [I − (1−α)·P]⁻¹
         const IminusP = this.matrixSubtract(
@@ -100,16 +126,16 @@ class MarkovPowderModel {
         );
         const inv = this.matrixInverse(IminusP);
 
-        // π₀·P  (initial state after one thermal cycle)
-        const pi0P = Array(n).fill(0);
+        // δ₀·P  (virgin powder after one thermal cycle)
+        const d0P = Array(n).fill(0);
         for (let j = 0; j < n; j++)
             for (let k = 0; k < n; k++)
-                pi0P[j] += pi0[k] * this.P[k][j];
+                d0P[j] += delta0[k] * this.P[k][j];
 
-        // α · π₀·P · [I−(1−α)·P]⁻¹
+        // α · δ₀·P · [I−(1−α)·P]⁻¹
         const result = Array(n).fill(0);
         for (let j = 0; j < n; j++) {
-            for (let k = 0; k < n; k++) result[j] += pi0P[k] * inv[k][j];
+            for (let k = 0; k < n; k++) result[j] += d0P[k] * inv[k][j];
             result[j] *= alpha;
         }
         return result;
@@ -117,6 +143,31 @@ class MarkovPowderModel {
 
     calculateQuality(piStock) {
         return this.w.reduce((s, wi, i) => s + wi * piStock[i], 0);
+    }
+
+    /**
+     * MODEL B — One-step (per-build) propagation using the empirical
+     * current stock distribution piE directly:
+     *   mix    = α·δ₀ + (1−α)·piE        (loading the hopper for this build)
+     *   π_next = mix · P                  (one thermal/sinter cycle)
+     *
+     * This is the correct way to use real-time build-tracking data —
+     * it answers "what will this build's resulting powder quality be
+     * if I use ratio α right now", not a steady-state question.
+     *
+     * @param {number} alpha
+     * @param {Array}  piE — current empirical stock distribution
+     */
+    oneStepDistribution(alpha, piE) {
+        const n = this.P.length;
+        const delta0 = [1, 0, 0, 0, 0];
+        const mix = Array(n).fill(0).map((_, i) => alpha * delta0[i] + (1 - alpha) * piE[i]);
+
+        const piNext = Array(n).fill(0);
+        for (let j = 0; j < n; j++)
+            for (let k = 0; k < n; k++)
+                piNext[j] += mix[k] * this.P[k][j];
+        return piNext;
     }
 
     /**
@@ -146,7 +197,10 @@ class MarkovPowderModel {
     }
 
     /**
-     * Bisection optimisation — finds minimum α satisfying quality + sustainability
+     * MODEL B optimiser — bisection over α using the one-step (per-build)
+     * propagation of the empirical current stock distribution (this.pi0).
+     * Replaces the earlier (incorrect) call into the Model A steady-state
+     * formula with the empirical stock plugged in as if it were δ₀.
      */
     optimizeVirginRatio(packingDensity, qualityThreshold = 0.60, degradedLimit = 0.12, tolerance = 0.001) {
         let alphaMin = packingDensity;
@@ -154,11 +208,11 @@ class MarkovPowderModel {
         let iter = 0;
 
         while ((alphaMax - alphaMin) > tolerance && iter < 50) {
-            const mid    = (alphaMin + alphaMax) / 2;
-            const piStock = this.calculateSteadyState(mid);
-            const Q       = this.calculateQuality(piStock);
+            const mid     = (alphaMin + alphaMax) / 2;
+            const piNext  = this.oneStepDistribution(mid, this.pi0);
+            const Q       = this.calculateQuality(piNext);
 
-            if (Q >= qualityThreshold && piStock[4] <= degradedLimit) {
+            if (Q >= qualityThreshold && piNext[4] <= degradedLimit) {
                 alphaMax = mid;
             } else {
                 alphaMin = mid;
@@ -167,7 +221,7 @@ class MarkovPowderModel {
         }
 
         const alphaOpt = alphaMax;
-        const piOpt    = this.calculateSteadyState(alphaOpt);
+        const piOpt    = this.oneStepDistribution(alphaOpt, this.pi0);
 
         return {
             alphaOptimal:    alphaOpt,
@@ -178,6 +232,7 @@ class MarkovPowderModel {
             converged:       iter < 50,
             pi0Source:       this.pi0Source,
             pi0RunsUsed:     this.pi0RunsUsed,
+            model:           'B',
         };
     }
 

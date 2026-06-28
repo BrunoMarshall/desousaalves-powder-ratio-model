@@ -1100,8 +1100,8 @@ function displayResults(results, economics, inputs) {
     }
 
     const sourceBadge = pi0Source==='empirical_history'
-        ? `<span style="display:inline-block;background:#e8f5e9;color:#27ae60;border-radius:4px;padding:2px 8px;font-size:0.79rem;font-weight:600;margin-left:0.5rem;">Data-driven (${pi0RunsUsed} builds)</span>`
-        : `<span style="display:inline-block;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 8px;font-size:0.79rem;">Virgin assumption</span>`;
+        ? `<span style="display:inline-block;background:#e8f5e9;color:#27ae60;border-radius:4px;padding:2px 8px;font-size:0.79rem;font-weight:600;margin-left:0.5rem;">Model B — data-driven (${pi0RunsUsed} builds)</span>`
+        : `<span style="display:inline-block;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 8px;font-size:0.79rem;">Model B — virgin assumption</span>`;
 
     let html = calibrationNote + `
         <div class="result-item">
@@ -1125,7 +1125,7 @@ function displayResults(results, economics, inputs) {
                     (${degradedFraction<=inputs.degradedLimit?'✓ Pass':'✗ Fail'})</span>
             </div>
         </div>
-        <div class="state-distribution"><h4>Steady-State Powder Distribution</h4>`;
+        <div class="state-distribution"><h4>Predicted Powder Distribution — Next Build (Model B)</h4>`;
 
     piStock.forEach((frac,i)=>{
         const pct=(frac*100).toFixed(1);

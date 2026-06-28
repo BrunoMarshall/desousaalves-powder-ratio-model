@@ -158,6 +158,28 @@ p {
     margin-top: 0.5rem;
 }
 
+.hero-footnote {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 1.5rem;
+    font-style: italic;
+    opacity: 0.85;
+}
+
+.section-intro {
+    max-width: 760px;
+    margin: 0 auto 1.75rem;
+    color: var(--text-light);
+    font-size: 0.97rem;
+    line-height: 1.55;
+    text-align: center;
+}
+
+.section-intro a {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
 /* Calculator Section */
 .calculator-container {
     display: grid;

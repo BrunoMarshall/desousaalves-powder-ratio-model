@@ -677,7 +677,7 @@ function onLoginSuccess(data) {
 }
 
 function doLogout() {
-    authToken = null; operatorInfo = null; buildHistory = [];
+    authToken = null; operatorInfo = null; buildHistory = []; lastEmpiricalState = null; pi0ModePreference = 'data';
     localStorage.removeItem('sls_token'); localStorage.removeItem('sls_operator');
     model.pi0 = [1.0,0,0,0,0]; model.pi0Source = 'assumed_virgin';
     updateNavLoginBtn(); updateCalculateBtn(); renderHistoryPanel(); updatePi0Badge(null);
@@ -846,6 +846,9 @@ function showMachineLockWarn(names) {
 // π(0) BADGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let lastEmpiricalState = null;
+let pi0ModePreference = 'data'; // 'data' | 'virgin' — user's explicit choice, survives history refreshes
+
 async function loadInitialState() {
     const pool = activePool();
     if (!authToken || !pool) return;
@@ -854,17 +857,57 @@ async function loadInitialState() {
             { headers: { Authorization:`Bearer ${authToken}` } });
         if (!res.ok) return;
         const data = await res.json();
-        model.pi0=data.pi0; model.pi0Source=data.source; model.pi0RunsUsed=data.runs_used;
-        updatePi0Badge(data);
+        lastEmpiricalState = data;
+        if (pi0ModePreference === 'virgin') {
+            updatePi0Badge(data, 'virgin');
+        } else {
+            model.pi0=data.pi0; model.pi0Source=data.source; model.pi0RunsUsed=data.runs_used;
+            updatePi0Badge(data, 'data');
+        }
     } catch (e) { console.warn('loadInitialState:', e.message); }
 }
 
-function updatePi0Badge(data) {
+/**
+ * Lets the user explicitly choose between the data-driven recommendation
+ * (using their tracked build history) and a virgin-stock assumption,
+ * instead of this being decided silently by login state alone.
+ */
+function setPi0Mode(mode) {
+    pi0ModePreference = mode;
+    if (mode === 'virgin') {
+        model.pi0 = [1, 0, 0, 0, 0];
+        model.pi0Source = 'assumed_virgin';
+        model.pi0RunsUsed = 0;
+        updatePi0Badge(lastEmpiricalState, 'virgin');
+    } else {
+        if (lastEmpiricalState && lastEmpiricalState.source === 'empirical_history') {
+            model.pi0 = lastEmpiricalState.pi0;
+            model.pi0Source = lastEmpiricalState.source;
+            model.pi0RunsUsed = lastEmpiricalState.runs_used;
+            updatePi0Badge(lastEmpiricalState, 'data');
+        } else {
+            loadInitialState();
+        }
+    }
+}
+
+function updatePi0Badge(data, modeOverride) {
     const badge = document.getElementById('pi0-badge');
     if (!badge) return;
     const pool = activePool();
+    const currentMode = modeOverride || (model.pi0Source === 'empirical_history' ? 'data' : 'virgin');
+    const isData = currentMode === 'data';
 
-    if (data && data.source==='empirical_history') {
+    const toggle = (authToken && pool) ? `
+        <div class="pi0-toggle-row">
+            <span class="pi0-toggle-label ${isData ? 'active' : ''}" onclick="setPi0Mode('data')">Use my build history</span>
+            <span class="pi0-switch ${isData ? 'on' : 'off'}" onclick="setPi0Mode('${isData ? 'virgin' : 'data'}')" role="switch" aria-checked="${isData}">
+                <span class="pi0-switch-knob"></span>
+            </span>
+            <span class="pi0-toggle-label ${!isData ? 'active' : ''}" onclick="setPi0Mode('virgin')">Assume virgin stock</span>
+        </div>` : '';
+
+    if (data && data.source==='empirical_history' && currentMode==='data') {
         const poolLabel = pool
             ? `<span style="color:#1a4d7a;font-size:0.82rem;margin-left:0.4rem;">[${pool.name}${pool.material_name ? ' — '+pool.material_name : ''}]</span>`
             : '';
@@ -872,10 +915,13 @@ function updatePi0Badge(data) {
             `<span style="margin-right:6px"><strong>${['S₀','S₁','S₂','S₃','S₄'][i]}:</strong>${(v*100).toFixed(1)}%</span>`
         ).join('');
         badge.innerHTML=`<div><span style="color:#27ae60;font-weight:600;">✓ Data-driven π(0) — ${data.runs_used} builds</span>${poolLabel}</div>
-            <div style="margin-top:0.38rem;font-size:0.84rem;color:#555;">${pct}</div>`;
+            <div style="margin-top:0.38rem;font-size:0.84rem;color:#555;">${pct}</div>${toggle}`;
         badge.style.background='#f0fff4'; badge.style.borderColor='#b2dfdb';
+    } else if (authToken && pool && currentMode==='virgin') {
+        badge.innerHTML=`<span style="color:#888;">Using virgin-stock assumption (your choice).</span>${toggle}`;
+        badge.style.background='#fffef0'; badge.style.borderColor='#e0d89a';
     } else if (authToken && pool) {
-        badge.innerHTML=`<span style="color:#888;">No builds for pool "<strong>${pool.name}</strong>" yet — using virgin initial state.</span>`;
+        badge.innerHTML=`<span style="color:#888;">No builds for pool "<strong>${pool.name}</strong>" yet — using virgin initial state.</span>${toggle}`;
         badge.style.background='#fffef0'; badge.style.borderColor='#e0d89a';
     } else {
         badge.innerHTML=`<span style="color:#888;">Sign in to enable data-driven mode. Create pools for machines that share powder.</span>`;
@@ -1100,8 +1146,8 @@ function displayResults(results, economics, inputs) {
     }
 
     const sourceBadge = pi0Source==='empirical_history'
-        ? `<span style="display:inline-block;background:#e8f5e9;color:#27ae60;border-radius:4px;padding:2px 8px;font-size:0.79rem;font-weight:600;margin-left:0.5rem;">Model B — data-driven (${pi0RunsUsed} builds)</span>`
-        : `<span style="display:inline-block;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 8px;font-size:0.79rem;">Model B — virgin assumption</span>`;
+        ? `<span style="display:inline-block;background:#e8f5e9;color:#27ae60;border-radius:4px;padding:2px 8px;font-size:0.79rem;font-weight:600;margin-left:0.5rem;">Data-driven (${pi0RunsUsed} builds)</span>`
+        : `<span style="display:inline-block;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 8px;font-size:0.79rem;">Virgin assumption</span>`;
 
     let html = calibrationNote + `
         <div class="result-item">
@@ -1125,7 +1171,7 @@ function displayResults(results, economics, inputs) {
                     (${degradedFraction<=inputs.degradedLimit?'✓ Pass':'✗ Fail'})</span>
             </div>
         </div>
-        <div class="state-distribution"><h4>Predicted Powder Distribution — Next Build (Model B)</h4>`;
+        <div class="state-distribution"><h4>Predicted Powder Distribution — Next Build</h4>`;
 
     piStock.forEach((frac,i)=>{
         const pct=(frac*100).toFixed(1);

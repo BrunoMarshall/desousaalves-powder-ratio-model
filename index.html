@@ -52,7 +52,7 @@
         <!-- Calculator Section -->
         <section id="calculator" class="calculator-section">
             <h2>Interactive Calculator</h2>
-            <p class="section-intro">This calculator runs <strong>Model B</strong> — the per-build control model. If you're signed in with build history, it uses your live powder-stock distribution to recommend the virgin ratio for your <em>next</em> build. Without history, it falls back to a virgin-stock assumption. See <a href="#methodology">Methodology</a> for how this differs from the long-run planning model (Model A).</p>
+            <p class="section-intro">If you're signed in to record build history, this calculator uses your live powder-stock distribution to recommend the virgin ratio for your next build. Without history, it falls back to a virgin-stock assumption. See the <a href="#methodology">Methodology</a> section for the full mathematical background.</p>
             
             <div class="calculator-container">
                 <div class="input-panel">
@@ -148,7 +148,8 @@
         <!-- Methodology Section -->
         <section id="methodology" class="methodology-section">
             <h2>Methodology</h2>
-            
+            <p class="section-intro">The full probabilistic derivation below — the controlled refresh operator, the steady-state and per-build models as two functionals of it, and the corrected optimization algorithm — was formalized by co-author Spyridon Pougkakiotis (King's College London).</p>
+
             <div class="method-grid">
                 <div class="method-card">
                     <h3>1. State Space Definition</h3>
@@ -164,40 +165,76 @@
 
                 <div class="method-card">
                     <h3>2. Markov Chain Formulation</h3>
-                    <p>Powder aging follows a stochastic process with transition probabilities calibrated from 7-cycle DSC studies:</p>
+                    <p>Powder aging follows a discrete-time, time-homogeneous Markov chain with transition probabilities calibrated from 7-cycle DSC studies:</p>
                     <p class="equation">P(S<sub>k+1</sub> = j | S<sub>k</sub> = i) = p<sub>ij</sub></p>
-                    <p>The transition matrix P is upper triangular (irreversible aging) with S₄ as an absorbing state.</p>
+                    <p>The transition matrix P is upper triangular (irreversible aging) with S₄ as an absorbing state. The mass distribution evolves by the Kolmogorov forward equation π<sup>(n+1)</sup> = π<sup>(n)</sup>P, and by the Chapman-Kolmogorov identity P<sup>(m+k)</sup> = P<sup>m</sup>P<sup>k</sup> — i.e. P<sup>(n)</sup> = P<sup>n</sup>.</p>
                 </div>
 
                 <div class="method-card">
-                    <h3>3a. Model A — Long-Run Planning</h3>
-                    <p>For capacity and design decisions, the equilibrium distribution under a fixed virgin ratio α is derived analytically, starting from a virgin powder charge:</p>
-                    <p class="equation">π<sub>stock</sub>* = α·δ₀·P·[I - (1-α)·P]<sup>-1</sup></p>
-                    <p>This closed-form solution gives the long-run state distribution if ratio α is used indefinitely — it deliberately does not depend on what is in the hopper today.</p>
+                    <h3>3. The Controlled Refresh Operator</h3>
+                    <p>Both models are built from a single object. At the start of each build, the recovered stock π is blended with virgin powder in proportion α (the refresh map), and the build advances the mixture one step under P:</p>
+                    <p class="equation">T<sub>α</sub>(π) = [α·δ₀ + (1-α)·π]·P</p>
+                    <p>where δ₀ is the point mass at the virgin state. T<sub>α</sub> maps the probability simplex into itself. Model A is the limit T<sub>α</sub><sup>n</sup>(·) as n→∞ (history forgotten); Model B is a single application T<sub>α</sub>(π<sub>e</sub>) to the measured current stock (history retained).</p>
                 </div>
 
                 <div class="method-card">
-                    <h3>3b. Model B — Per-Build Control</h3>
-                    <p>For operational decisions, the model instead uses the empirically measured current stock distribution π<sub>e</sub> directly. It mixes π<sub>e</sub> with fresh virgin powder at ratio α, then propagates one thermal cycle through P:</p>
-                    <p class="equation">π<sub>next</sub> = [α·δ₀ + (1-α)·π<sub>e</sub>]·P</p>
-                    <p>This answers the question the build-tracking app is built for: <em>given what's in the hopper right now, what α should I use for the next build?</em></p>
+                    <h3>4a. Model A — Long-Run Planning</h3>
+                    <p>T<sub>α</sub> has a unique fixed point, reached from any starting distribution:</p>
+                    <p class="equation">π* (α) = α·δ₀·P·[I − (1-α)·P]<sup>-1</sup></p>
+                    <p>This has a transparent reading as a <strong>geometric-age mixture</strong>: the stationary stock is a mixture, over a geometric age M ~ Geom(α), of virgin powder that has aged M+1 cycles since its last refresh. Under a monotone-ageing condition on P, the steady-state quality is provably nondecreasing in α and the terminal (degraded) mass is provably nonincreasing — which licenses solving the design problem<br>
+                    <span class="equation" style="display:block;margin-top:0.5rem;">min α s.t. ⟨π*(α), w⟩ ≥ Q<sub>min</sub>, π*(α)<sub>S₄</sub> ≤ ε<sub>degrade</sub>, α ≥ ρ<sub>pack</sub></span>
+                    by bisection. The initial condition is annihilated by construction — Model A characterizes a <em>policy</em>, not a batch, and is the right tool for capacity planning and virgin-powder budgeting.</p>
                 </div>
 
                 <div class="method-card">
-                    <h3>4. Quality Metric</h3>
+                    <h3>4b. The Empirical-Initialization Issue</h3>
+                    <p>A natural but incorrect step is to substitute the measured stock π<sub>e</sub> for δ₀ inside the steady-state formula above. This is not ill-defined or wrongly normalized — it is a correctly normalized probability vector. The issue is that it is the fixed point of a <em>different</em> recursion: one where the refresh source every cycle is the aged stock π<sub>e</sub> itself, not virgin powder. It therefore answers neither the planning question nor the per-build question; it silently changes the physical assumption that refresh is pristine. The measured history can only correctly enter a finite-horizon model — which is exactly what Model B is.</p>
+                </div>
+
+                <div class="method-card">
+                    <h3>5. Model B — Per-Build Control</h3>
+                    <p>For operational decisions, the model uses the empirically measured current stock π<sub>e</sub> directly: it mixes π<sub>e</sub> with fresh virgin powder at ratio α, then propagates <em>one</em> thermal cycle through P:</p>
+                    <p class="equation">π<sub>next</sub>(α) = [α·δ₀ + (1-α)·π<sub>e</sub>]·P</p>
+                    <p>This is an exact one-step prediction, not an approximation, and it is affine in α. It answers: <em>given what's in the hopper right now, what α should I use for the next build?</em> Because the decision is re-solved every cycle from a freshly measured state, Model B is a receding-horizon (model-predictive) controller with horizon one.</p>
+                </div>
+
+                <div class="method-card">
+                    <h3>6. Optimization Algorithm (Model B)</h3>
+                    <p>Under the same monotone-ageing condition, quality Q(α) = ⟨π<sub>next</sub>(α), w⟩ is provably nondecreasing in α and the degraded fraction D(α) = π<sub>next</sub>(α)<sub>S₄</sub> is provably nonincreasing — so the feasible region is a single interval and bisection finds its lower endpoint exactly:</p>
+                    <p class="equation">min α s.t. α ≥ ρ<sub>pack</sub>, Q(α) ≥ Q<sub>min</sub>, D(α) ≤ ε<sub>degrade</sub></p>
+                    <p>This calculator's bisection includes a feasibility guard: if even α = 1 (pure virgin) cannot satisfy the specification, the batch is reported as infeasible rather than silently returned as α = 1.</p>
+                </div>
+
+                <div class="method-card">
+                    <h3>7. Quality Metric</h3>
                     <p>Composite quality index based on state distribution:</p>
                     <p class="equation">Q(π) = w·π<sup>T</sup></p>
                     <p>Weight vector: w = [1.0, 0.9, 0.7, 0.4, 0.0]</p>
-                    <p>Calibrated to mechanical property degradation.</p>
+                    <p>Calibrated to mechanical property degradation. The weight vector is required to be nonincreasing for the monotonicity results above to hold.</p>
                 </div>
             </div>
 
+            <div class="comparison-box">
+                <h3>Which Model Solves Which Problem</h3>
+                <table class="comparison-table">
+                    <thead><tr><th></th><th>Model A — Steady State</th><th>Model B — Receding Horizon</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Object</strong></td><td>π*(α), fixed point of T<sub>α</sub></td><td>π<sub>next</sub>(α) = T<sub>α</sub>(π<sub>e</sub>), one application of T<sub>α</sub></td></tr>
+                        <tr><td><strong>Horizon</strong></td><td>Infinite</td><td>One step (re-solved each cycle)</td></tr>
+                        <tr><td><strong>Initial state</strong></td><td>Forgotten</td><td>Retained exactly</td></tr>
+                        <tr><td><strong>Question</strong></td><td>Best constant policy and its long-run quality</td><td>Best α for the next build given current stock</td></tr>
+                        <tr><td><strong>Typical use</strong></td><td>Capacity planning, virgin-powder budgeting</td><td>Per-batch operating decision on the line</td></tr>
+                        <tr><td><strong>Caveat</strong></td><td>Cannot personalize to a batch</td><td>Greedy ≠ cumulative-optimal over many builds</td></tr>
+                    </tbody>
+                </table>
+                <p style="margin-top:1rem;font-size:0.88rem;color:#555;">
+                    Both models share the same foundational assumptions (Markov sufficiency, time-homogeneity, irreversible ageing, well-mixed stock with pristine virgin refresh) and are generated by the same controlled operator T<sub>α</sub>. A finite-horizon (H-step) controller that interpolates continuously between the two — retaining history with weight (1-α)<sup>H</sup> and recovering Model A as H→∞ — is developed in the underlying paper as a natural extension for guarding against near-term constraint violations over a short look-ahead window; it is not yet implemented in this calculator.
+                </p>
+            </div>
+
             <div class="validation-box">
-                <h3>Pilot Calibration (Model A)</h3>
-                <p><strong>System:</strong> Formlabs Fuse 1+ 30W (ρ<sub>pack</sub> = 29%)</p>
-                <p><strong>Model A Optimum:</strong> α<sub>opt</sub> = 29%</p>
-                <p><strong>Formlabs Guideline:</strong> α = 30%</p>
-                <p><strong>Difference:</strong> 1.0 percentage point</p>
+                <h3>Pilot Calibration</h3>
+                <p><strong>System:</strong> Formlabs Fuse 1+ 30W</p>
                 <p>Calibrated from a 7-cycle DSC pilot study tracking melting onset temperature, which shows a non-decreasing trend consistent with thermal aging. This is a single-machine, single-batch proof-of-concept; broader replication is needed before treating these figures as validated operational benchmarks.</p>
             </div>
         </section>
@@ -206,30 +243,29 @@
         <section id="citation" class="citation-section">
             <h2>Citation</h2>
             <div class="citation-box">
-                <h3>Paper (In Review)</h3>
+                <h3>Paper draft (working / finalising corrections)</h3>
                 <pre>
 Bruno Alexandre de Sousa Alves, Abdel-Hamid Soliman, Dimitrios Kontziampasis,
 Spyridon Pougkakiotis
 "A Novel Stochastic Model for Optimizing PA12 Powder Refresh Ratios in 
 Selective Laser Sintering: Application of Markov Chain Theory to Minimize 
-Material Waste in Additive Manufacturing", 2026 (In Review)
+Material Waste in Additive Manufacturing", 2026 (Not submitted)
                 </pre>
 
                 <h3>Software</h3>
                 <pre>
-De Sousa Alves, B. A., Soliman, A. H., Kontziampasis, D., & Pougkakiotis, S. (2026). 
-Powder Refresh Ratio Optimization Model (Version 2.0) [Computer software]. 
+De Sousa Alves, B. A. (2026). 
+Powder Refresh Ratio Optimization Model. 
 https://github.com/BrunoMarshall/desousaalves-powder-ratio-model
                 </pre>
 
                 <h3>BibTeX</h3>
                 <pre>
 @software{desousaalves2026powder,
-  author = {de Sousa Alves, Bruno Alexandre and Soliman, Abdel-Hamid and Kontziampasis, Dimitrios and Pougkakiotis, Spyridon},
+  author = {de Sousa Alves, Bruno Alexandre},
   title = {Powder Refresh Ratio Optimization Model},
   year = {2026},
-  url = {https://github.com/BrunoMarshall/desousaalves-powder-ratio-model},
-  version = {2.0}
+  url = {https://github.com/BrunoMarshall/desousaalves-powder-ratio-model}
 }
                 </pre>
             </div>
@@ -244,18 +280,19 @@ https://github.com/BrunoMarshall/desousaalves-powder-ratio-model
                     <p>Staffordshire University, UK</p>
                     <p>Ford-Werke GmbH, Germany</p>
                     <p>ORCID: 0000-0002-2716-5329</p>
+                    <p>✉️ <a href="mailto:bruno.alves@research.staffs.ac.uk">bruno.alves@research.staffs.ac.uk</a></p>
                 </div>
                 <div class="author-card">
                     <h3>Abdel-Hamid Soliman</h3>
                     <p>Staffordshire University, UK</p>
                     <p>ORCID: 0000-0001-7382-1107</p>
-                    <p>✉️ <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="fe9fd08d919297939f90be8d8a9f98988dd09f9dd08b95">[email&#160;protected]</a></p>
+                    <p>✉️ <a href="mailto:A.Soliman@staffs.ac.uk">A.Soliman@staffs.ac.uk</a></p>
                 </div>
                 <div class="author-card">
                     <h3>Dimitrios Kontziampasis</h3>
                     <p>University of Leeds, UK</p>
                     <p>ORCID: 0000-0002-6787-8892</p>
-                    <p>✉️ <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="4703690c2829333d2e262a3726342e34072b2222233469262469322c">[email&#160;protected]</a></p>
+                    <p>✉️ <a href="mailto:D.Kontziampasis@leeds.ac.uk">D.Kontziampasis@leeds.ac.uk</a></p>
                 </div>
                 <div class="author-card">
                     <h3>Spyridon Pougkakiotis</h3>

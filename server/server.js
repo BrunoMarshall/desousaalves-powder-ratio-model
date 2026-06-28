@@ -50,10 +50,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Rate limiting — 100 req/15min per IP
+// Rate limiting — 600 req/15min per IP (raised from 100; normal interactive
+// use fires several requests per page load/login: materials, history,
+// runs, initial-state — 100 was too easy to exhaust during real testing)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 600,
   standardHeaders: true,
   legacyHeaders: false,
 });

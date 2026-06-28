@@ -148,7 +148,6 @@
         <!-- Methodology Section -->
         <section id="methodology" class="methodology-section">
             <h2>Methodology</h2>
-            <p class="section-intro">The full probabilistic derivation below — the controlled refresh operator, the steady-state and per-build models as two functionals of it, and the corrected optimization algorithm — was formalized by co-author Spyridon Pougkakiotis (King's College London).</p>
 
             <div class="method-grid">
                 <div class="method-card">
@@ -178,17 +177,12 @@
                 </div>
 
                 <div class="method-card">
-                    <h3>4a. Model A — Long-Run Planning</h3>
+                    <h3>4. Model A — Long-Run Planning</h3>
                     <p>T<sub>α</sub> has a unique fixed point, reached from any starting distribution:</p>
                     <p class="equation">π* (α) = α·δ₀·P·[I − (1-α)·P]<sup>-1</sup></p>
                     <p>This has a transparent reading as a <strong>geometric-age mixture</strong>: the stationary stock is a mixture, over a geometric age M ~ Geom(α), of virgin powder that has aged M+1 cycles since its last refresh. Under a monotone-ageing condition on P, the steady-state quality is provably nondecreasing in α and the terminal (degraded) mass is provably nonincreasing — which licenses solving the design problem<br>
                     <span class="equation" style="display:block;margin-top:0.5rem;">min α s.t. ⟨π*(α), w⟩ ≥ Q<sub>min</sub>, π*(α)<sub>S₄</sub> ≤ ε<sub>degrade</sub>, α ≥ ρ<sub>pack</sub></span>
                     by bisection. The initial condition is annihilated by construction — Model A characterizes a <em>policy</em>, not a batch, and is the right tool for capacity planning and virgin-powder budgeting.</p>
-                </div>
-
-                <div class="method-card">
-                    <h3>4b. The Empirical-Initialization Issue</h3>
-                    <p>A natural but incorrect step is to substitute the measured stock π<sub>e</sub> for δ₀ inside the steady-state formula above. This is not ill-defined or wrongly normalized — it is a correctly normalized probability vector. The issue is that it is the fixed point of a <em>different</em> recursion: one where the refresh source every cycle is the aged stock π<sub>e</sub> itself, not virgin powder. It therefore answers neither the planning question nor the per-build question; it silently changes the physical assumption that refresh is pristine. The measured history can only correctly enter a finite-horizon model — which is exactly what Model B is.</p>
                 </div>
 
                 <div class="method-card">

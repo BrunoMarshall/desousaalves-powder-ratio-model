@@ -2,7 +2,8 @@
  * De Sousa Alves et al. Powder Refresh Ratio Optimization Model
  * Markov Chain-Based Framework for SLS Powder Management
  *
- * v3.0 — Model A / Model B split (correction per S. Pougkakiotis review)
+ * v3.1 — Corrected transition matrix P to match Dirichlet-Bayesian
+ *        calibrated values (manuscript Table 6). Redeploy trigger.
  *
  *   Model A — calculateSteadyState(alpha)
  *     Long-run planning/design model. Always starts from virgin powder

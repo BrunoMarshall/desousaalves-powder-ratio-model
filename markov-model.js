@@ -32,13 +32,15 @@
 
 class MarkovPowderModel {
     constructor() {
-        // Transition probability matrix P — calibrated from 7-cycle DSC study
+        // Transition probability matrix P — Dirichlet-Bayesian calibration
+        // (prior pseudo-count weight κ=10 per row) combined with the 7-cycle
+        // DSC melting-onset aging study. Matches manuscript Table 6.
         this.P = [
-            [0.62, 0.33, 0.04, 0.01, 0.00],
-            [0.00, 0.67, 0.26, 0.06, 0.01],
-            [0.00, 0.00, 0.72, 0.22, 0.06],
-            [0.00, 0.00, 0.00, 0.77, 0.23],
-            [0.00, 0.00, 0.00, 0.00, 1.00],
+            [0.5455, 0.3636, 0.0909, 0.0000, 0.0000],
+            [0.0000, 0.6364, 0.3182, 0.0455, 0.0000],
+            [0.0000, 0.0000, 0.7083, 0.2500, 0.0417],
+            [0.0000, 0.0000, 0.0000, 0.7500, 0.2500],
+            [0.0000, 0.0000, 0.0000, 0.0000, 1.0000],
         ];
 
         this.w = [1.0, 0.9, 0.7, 0.4, 0.0];
